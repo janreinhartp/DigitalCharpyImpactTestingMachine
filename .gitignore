@@ -1,0 +1,18 @@
+# Build output
+build/
+
+# Managed components (downloaded by IDF component manager)
+managed_components/
+
+# SDK config backup
+sdkconfig.old
+
+# IDE / Editor
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+Thumbs.db
+.DS_Store
