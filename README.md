@@ -7,8 +7,9 @@ Firmware for a digital Charpy impact testing machine built on the **CrowPanel ES
 | Component | Interface | Details |
 |---|---|---|
 | CrowPanel ESP32-P4 | — | 9" 1024×600 IPS, MIPI DSI (EK79007), GT911 touch |
-| AS5600 Magnetic Encoder | I2C (0x36) | 12-bit angle, shared bus IO45/IO46 |
-| DS3231 RTC | I2C (0x68) | Battery-backed, ±2ppm, temperature compensated |
+| AS5600 Magnetic Encoder | I2C (0x36) | 12-bit angle, **5V supply**, HV side of level shifter |
+| BSS138 Level Shifter | I2C | Bidirectional 3.3V ↔ 5V on SDA/SCL; LV side to ESP32, HV side to AS5600 |
+| DS3231 RTC | I2C (0x68) | Battery-backed, ±2ppm, temperature compensated; 3.3V side of bus |
 | SD Card | SDMMC 1-line | IO44 CMD, IO43 CLK, IO39 D0, FAT32 |
 | Speaker + Amplifier | I2S1 | 16kHz/16-bit, amp on IO30 (active-low) |
 | Motor Relay | GPIO47 | Lifts pendulum arm |
@@ -19,13 +20,20 @@ Firmware for a digital Charpy impact testing machine built on the **CrowPanel ES
 
 ```mermaid
 graph LR
-    AS5600("AS5600 Encoder\nI²C 0x36")
-    DS3231("DS3231 RTC\nI²C 0x68")
+    AS5600("AS5600 Encoder\nI²C 0x36\n5V supply")
+    DS3231("DS3231 RTC\nI²C 0x68\n3.3V supply")
     SD("SD Card\nFAT32")
     AMP("I2S Amplifier\n+ Speaker")
     MOTOR("Motor Relay")
     ACTUATOR("Actuator Relay")
     ENDSTOP("Endstop Switch")
+
+    subgraph LS ["BSS138 Level Shifter"]
+        LV_SDA["LV · SDA\n3.3V side"]
+        LV_SCL["LV · SCL\n3.3V side"]
+        HV_SDA["HV · SDA\n5V side"]
+        HV_SCL["HV · SCL\n5V side"]
+    end
 
     subgraph ESP32P4 ["CrowPanel ESP32-P4"]
         I2C_SDA["IO45 · SDA"]
@@ -42,8 +50,10 @@ graph LR
         IO33["IO33 · pull-up"]
     end
 
-    AS5600 --- I2C_SDA
-    AS5600 --- I2C_SCL
+    I2C_SDA --- LV_SDA
+    I2C_SCL --- LV_SCL
+    HV_SDA --- AS5600
+    HV_SCL --- AS5600
     DS3231 --- I2C_SDA
     DS3231 --- I2C_SCL
     SD --- SD_CMD
@@ -58,7 +68,7 @@ graph LR
     ENDSTOP --- IO33
 ```
 
-> **Note:** AS5600 and DS3231 share the same I2C bus (IO45/IO46). `¬` = active-low. `pull-up` = internal pull-up, active-low signal.
+> **Note:** The AS5600 is powered from 5V; a BSS138-based bidirectional level shifter bridges the 3.3V ESP32 I2C bus (IO45/IO46) to the 5V AS5600. The DS3231 runs at 3.3V and connects directly on the LV side. `¬` = active-low. `pull-up` = internal pull-up, active-low signal.
 
 ## Software Stack
 
