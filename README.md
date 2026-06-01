@@ -9,7 +9,7 @@ Firmware for a digital Charpy impact testing machine built on the **CrowPanel ES
 | CrowPanel ESP32-P4 | — | 9" 1024×600 IPS, MIPI DSI (EK79007), GT911 touch |
 | AS5600 Magnetic Encoder | I2C (0x36) | 12-bit angle, **5V supply**, HV side of level shifter |
 | BSS138 Level Shifter | I2C | Bidirectional 3.3V ↔ 5V on SDA/SCL; LV side to ESP32, HV side to AS5600 |
-| DS3231 RTC | I2C (0x68) | Battery-backed, ±2ppm, temperature compensated; 3.3V side of bus |
+| Tiny RTC (DS1307) | I2C (0x68) | Battery-backed, CR2032 coin cell, **5V supply**, HV side of level shifter |
 | SD Card | SDMMC 1-line | IO44 CMD, IO43 CLK, IO39 D0, FAT32 |
 | Speaker + Amplifier | I2S1 | 16kHz/16-bit, amp on IO30 (active-low) |
 | Motor Relay | GPIO47 | Lifts pendulum arm |
@@ -21,7 +21,7 @@ Firmware for a digital Charpy impact testing machine built on the **CrowPanel ES
 ```mermaid
 graph LR
     AS5600("AS5600 Encoder\nI²C 0x36\n5V supply")
-    DS3231("DS3231 RTC\nI²C 0x68\n3.3V supply")
+    DS1307("Tiny RTC (DS1307)\nI²C 0x68\n5V supply")
     SD("SD Card\nFAT32")
     AMP("I2S Amplifier\n+ Speaker")
     MOTOR("Motor Relay")
@@ -54,8 +54,8 @@ graph LR
     I2C_SCL --- LV_SCL
     HV_SDA --- AS5600
     HV_SCL --- AS5600
-    DS3231 --- I2C_SDA
-    DS3231 --- I2C_SCL
+    HV_SDA --- DS1307
+    HV_SCL --- DS1307
     SD --- SD_CMD
     SD --- SD_CLK
     SD --- SD_D0
@@ -68,7 +68,7 @@ graph LR
     ENDSTOP --- IO33
 ```
 
-> **Note:** The AS5600 is powered from 5V; a BSS138-based bidirectional level shifter bridges the 3.3V ESP32 I2C bus (IO45/IO46) to the 5V AS5600. The DS3231 runs at 3.3V and connects directly on the LV side. `¬` = active-low. `pull-up` = internal pull-up, active-low signal.
+> **Note:** Both the AS5600 and Tiny RTC (DS1307) are 5V devices and share the HV side of the BSS138 level shifter. The ESP32 I2C bus (IO45/IO46, 3.3V) connects to the LV side. `¬` = active-low. `pull-up` = internal pull-up, active-low signal.
 
 ## Software Stack
 
