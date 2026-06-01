@@ -15,8 +15,7 @@ Firmware for a digital Charpy impact testing machine built on the **CrowPanel ES
 | Motor Relay | GPIO47 | Lifts pendulum arm |
 | Actuator Relay | GPIO48 | Releases pendulum latch |
 | Endstop Switch | GPIO33 | Detects arm at top position (pull-up, debounced) |
-
-## Wiring Diagram
+| Metal Servo (14 V) | MCPWM / GPIO38 | 50 Hz PWM signal (3.3 V logic), motor power from dedicated 14 V supply |
 
 ```mermaid
 graph LR
@@ -27,6 +26,7 @@ graph LR
     MOTOR("Motor Relay")
     ACTUATOR("Actuator Relay")
     ENDSTOP("Endstop Switch")
+    SERVO("Metal Servo\n14 V supply")
 
     subgraph LS ["BSS138 Level Shifter"]
         LV_SDA["LV · SDA\n3.3V side"]
@@ -48,6 +48,7 @@ graph LR
         IO47["IO47"]
         IO48["IO48"]
         IO33["IO33 · pull-up"]
+        IO38["IO38 · MCPWM"]
     end
 
     I2C_SDA --- LV_SDA
@@ -66,9 +67,10 @@ graph LR
     MOTOR --- IO47
     ACTUATOR --- IO48
     ENDSTOP --- IO33
+    SERVO --- IO38
 ```
 
-> **Note:** Both the AS5600 and Tiny RTC (DS1307) are 5V devices and share the HV side of the BSS138 level shifter. The ESP32 I2C bus (IO45/IO46, 3.3V) connects to the LV side. `¬` = active-low. `pull-up` = internal pull-up, active-low signal.
+> **Note:** Both the AS5600 and Tiny RTC (DS1307) are 5V devices and share the HV side of the BSS138 level shifter. The ESP32 I2C bus (IO45/IO46, 3.3V) connects to the LV side. The metal servo runs from a **separate 14 V supply** — only GND and the 3.3 V PWM signal (IO38, 470 Ω series resistor recommended) connect to the ESP32. `¬` = active-low. `pull-up` = internal pull-up, active-low signal.
 
 ## Software Stack
 
