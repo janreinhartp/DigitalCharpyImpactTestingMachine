@@ -15,6 +15,51 @@ Firmware for a digital Charpy impact testing machine built on the **CrowPanel ES
 | Actuator Relay | GPIO48 | Releases pendulum latch |
 | Endstop Switch | GPIO33 | Detects arm at top position (pull-up, debounced) |
 
+## Wiring Diagram
+
+```mermaid
+graph LR
+    AS5600("AS5600 Encoder\nI²C 0x36")
+    DS3231("DS3231 RTC\nI²C 0x68")
+    SD("SD Card\nFAT32")
+    AMP("I2S Amplifier\n+ Speaker")
+    MOTOR("Motor Relay")
+    ACTUATOR("Actuator Relay")
+    ENDSTOP("Endstop Switch")
+
+    subgraph ESP32P4 ["CrowPanel ESP32-P4"]
+        I2C_SDA["IO45 · SDA"]
+        I2C_SCL["IO46 · SCL"]
+        SD_CMD["IO44 · CMD"]
+        SD_CLK["IO43 · CLK"]
+        SD_D0["IO39 · D0"]
+        I2S_LR["IO21 · LRCLK"]
+        I2S_BCLK["IO22 · BCLK"]
+        I2S_DOUT["IO23 · DOUT"]
+        AMP_EN["IO30 · AMP_EN ¬"]
+        IO47["IO47"]
+        IO48["IO48"]
+        IO33["IO33 · pull-up"]
+    end
+
+    AS5600 --- I2C_SDA
+    AS5600 --- I2C_SCL
+    DS3231 --- I2C_SDA
+    DS3231 --- I2C_SCL
+    SD --- SD_CMD
+    SD --- SD_CLK
+    SD --- SD_D0
+    AMP --- I2S_LR
+    AMP --- I2S_BCLK
+    AMP --- I2S_DOUT
+    AMP --- AMP_EN
+    MOTOR --- IO47
+    ACTUATOR --- IO48
+    ENDSTOP --- IO33
+```
+
+> **Note:** AS5600 and DS3231 share the same I2C bus (IO45/IO46). `¬` = active-low. `pull-up` = internal pull-up, active-low signal.
+
 ## Software Stack
 
 - **ESP-IDF** 5.4.3
