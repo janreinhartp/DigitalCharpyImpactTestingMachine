@@ -10,17 +10,19 @@ static endstop_callback_t endstop_cb = NULL;
 static TimerHandle_t endstop_debounce_timer = NULL;
 static volatile bool endstop_pending = false;
 
-/* Debounce timer callback — fires 50ms after last edge */
+/* Debounce timer callback — reads PCF8575 P2 to get actual endstop state */
 static void endstop_debounce_cb(TimerHandle_t xTimer)
 {
     (void)xTimer;
-    bool pressed = (gpio_get_level(GPIO_ENDSTOP) == 0);
+    bool pin_state = true; /* default high = not pressed */
+    pcf8575_pin_get(PCF8575_PIN_ENDSTOP, &pin_state);
+    bool pressed = !pin_state; /* active-low */
     if (endstop_cb != NULL) {
         endstop_cb(pressed);
     }
 }
 
-/* GPIO ISR for endstop — resets debounce timer */
+/* GPIO ISR for PCF8575 ~INT pin — resets debounce timer */
 static void IRAM_ATTR endstop_isr_handler(void *arg)
 {
     (void)arg;
@@ -35,66 +37,57 @@ static void IRAM_ATTR endstop_isr_handler(void *arg)
 
 esp_err_t gpio_extra_init(void)
 {
-    esp_err_t err = ESP_OK;
-    const gpio_config_t gpio_cofig = {
-        .pin_bit_mask = (1ULL << GPIO_ACTUATOR_RELAY),
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = false,
-        .pull_down_en = false,
-        .intr_type = GPIO_INTR_DISABLE,
-    };
-    err = gpio_config(&gpio_cofig);
-    return err;
+    /* Legacy stub — PCF8575 is initialised by relay_init() */
+    return ESP_OK;
 }
 
 esp_err_t gpio_extra_set_level(bool level)
 {
-    gpio_set_level(GPIO_ACTUATOR_RELAY, level);
-    return ESP_OK;
+    /* Maps legacy call to PCF8575 actuator relay pin */
+    if (level) {
+        return pcf8575_pin_set(PCF8575_PIN_ACTUATOR_RELAY);
+    } else {
+        return pcf8575_pin_clear(PCF8575_PIN_ACTUATOR_RELAY);
+    }
 }
 
 esp_err_t relay_init(void)
 {
-    esp_err_t err = ESP_OK;
-
-    /* Configure motor relay (IO47) and actuator relay (IO48) as outputs */
-    const gpio_config_t relay_cfg = {
-        .pin_bit_mask = (1ULL << GPIO_MOTOR_RELAY) | (1ULL << GPIO_ACTUATOR_RELAY),
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = false,
-        .pull_down_en = false,
-        .intr_type = GPIO_INTR_DISABLE,
-    };
-    err = gpio_config(&relay_cfg);
+    /* Initialise PCF8575 — sets all pins high (relays OFF, endstop as input) */
+    esp_err_t err = pcf8575_init();
     if (err != ESP_OK) {
-        EXTRA_ERROR("Failed to configure relay GPIOs");
+        EXTRA_ERROR("Failed to initialise PCF8575: %s", esp_err_to_name(err));
         return err;
     }
 
-    /* Ensure relays start OFF */
-    gpio_set_level(GPIO_MOTOR_RELAY, 0);
-    gpio_set_level(GPIO_ACTUATOR_RELAY, 0);
-    motor_relay_state = false;
+    motor_relay_state    = false;
     actuator_relay_state = false;
 
-    EXTRA_INFO("Relay GPIOs initialized (motor=IO%d, actuator=IO%d)", GPIO_MOTOR_RELAY, GPIO_ACTUATOR_RELAY);
+    EXTRA_INFO("Relays initialised via PCF8575 (motor=P%d, actuator=P%d)",
+               PCF8575_PIN_MOTOR_RELAY, PCF8575_PIN_ACTUATOR_RELAY);
     return ESP_OK;
 }
 
 esp_err_t motor_relay_set(bool on)
 {
-    gpio_set_level(GPIO_MOTOR_RELAY, on ? 1 : 0);
-    motor_relay_state = on;
-    EXTRA_DEBUG("Motor relay %s", on ? "ON" : "OFF");
-    return ESP_OK;
+    esp_err_t err = on ? pcf8575_pin_clear(PCF8575_PIN_MOTOR_RELAY)
+                       : pcf8575_pin_set(PCF8575_PIN_MOTOR_RELAY);
+    if (err == ESP_OK) {
+        motor_relay_state = on;
+        EXTRA_DEBUG("Motor relay %s", on ? "ON" : "OFF");
+    }
+    return err;
 }
 
 esp_err_t actuator_relay_set(bool on)
 {
-    gpio_set_level(GPIO_ACTUATOR_RELAY, on ? 1 : 0);
-    actuator_relay_state = on;
-    EXTRA_DEBUG("Actuator relay %s", on ? "ON" : "OFF");
-    return ESP_OK;
+    esp_err_t err = on ? pcf8575_pin_clear(PCF8575_PIN_ACTUATOR_RELAY)
+                       : pcf8575_pin_set(PCF8575_PIN_ACTUATOR_RELAY);
+    if (err == ESP_OK) {
+        actuator_relay_state = on;
+        EXTRA_DEBUG("Actuator relay %s", on ? "ON" : "OFF");
+    }
+    return err;
 }
 
 bool motor_relay_get(void)
@@ -111,17 +104,18 @@ esp_err_t endstop_init(void)
 {
     esp_err_t err = ESP_OK;
 
-    /* Configure endstop switch (IO33) as input with pull-up */
-    const gpio_config_t endstop_cfg = {
-        .pin_bit_mask = (1ULL << GPIO_ENDSTOP),
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = true,
+    /* PCF8575 P2 is already high (input mode) after relay_init().
+     * Configure ESP32 GPIO33 as input connected to PCF8575 ~INT (open-drain, active-low). */
+    const gpio_config_t int_cfg = {
+        .pin_bit_mask = (1ULL << PCF8575_GPIO_INT),
+        .mode         = GPIO_MODE_INPUT,
+        .pull_up_en   = true,
         .pull_down_en = false,
-        .intr_type = GPIO_INTR_ANYEDGE,
+        .intr_type    = GPIO_INTR_NEGEDGE, /* INT fires on falling edge */
     };
-    err = gpio_config(&endstop_cfg);
+    err = gpio_config(&int_cfg);
     if (err != ESP_OK) {
-        EXTRA_ERROR("Failed to configure endstop GPIO");
+        EXTRA_ERROR("Failed to configure PCF8575 INT GPIO");
         return err;
     }
 
@@ -133,26 +127,28 @@ esp_err_t endstop_init(void)
         return ESP_ERR_NO_MEM;
     }
 
-    /* Install GPIO ISR service and add handler */
+    /* Install GPIO ISR service and add handler for PCF8575 INT pin */
     err = gpio_install_isr_service(0);
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-        /* ESP_ERR_INVALID_STATE means ISR service already installed — that's fine */
         EXTRA_ERROR("Failed to install GPIO ISR service");
         return err;
     }
-    err = gpio_isr_handler_add(GPIO_ENDSTOP, endstop_isr_handler, NULL);
+    err = gpio_isr_handler_add(PCF8575_GPIO_INT, endstop_isr_handler, NULL);
     if (err != ESP_OK) {
-        EXTRA_ERROR("Failed to add endstop ISR handler");
+        EXTRA_ERROR("Failed to add PCF8575 INT ISR handler");
         return err;
     }
 
-    EXTRA_INFO("Endstop switch initialized on IO%d (pull-up, debounced)", GPIO_ENDSTOP);
+    EXTRA_INFO("Endstop initialized via PCF8575 P%d, INT on GPIO%d",
+               PCF8575_PIN_ENDSTOP, PCF8575_GPIO_INT);
     return ESP_OK;
 }
 
 bool endstop_is_pressed(void)
 {
-    return (gpio_get_level(GPIO_ENDSTOP) == 0);
+    bool state = true; /* default: not pressed */
+    pcf8575_pin_get(PCF8575_PIN_ENDSTOP, &state);
+    return !state; /* active-low */
 }
 
 esp_err_t endstop_register_callback(endstop_callback_t cb)

@@ -8,13 +8,14 @@ Firmware for a digital Charpy impact testing machine built on the **CrowPanel ES
 |---|---|---|
 | CrowPanel ESP32-P4 | — | 9" 1024×600 IPS, MIPI DSI (EK79007), GT911 touch |
 | AS5600 Magnetic Encoder | I2C (0x36) | 12-bit angle, **5V supply**, HV side of level shifter |
-| BSS138 Level Shifter | I2C | Bidirectional 3.3V ↔ 5V on SDA/SCL; LV side to ESP32, HV side to AS5600 |
+| BSS138 Level Shifter | I2C | Bidirectional 3.3V ↔ 5V on SDA/SCL; LV side to ESP32, HV side to 5V devices |
 | Tiny RTC (DS1307) | I2C (0x68) | Battery-backed, CR2032 coin cell, **5V supply**, HV side of level shifter |
+| PCF8575 I/O Expander | I2C (0x20) | 16-bit quasi-bidirectional; **5V supply**, HV side of level shifter; INT → GPIO33 |
 | SD Card | SDMMC 1-line | IO44 CMD, IO43 CLK, IO39 D0, FAT32 |
 | Speaker + Amplifier | I2S1 | 16kHz/16-bit, amp on IO30 (active-low) |
-| Motor Relay | GPIO47 | Lifts pendulum arm |
-| Actuator Relay | GPIO48 | Releases pendulum latch |
-| Endstop Switch | GPIO33 | Detects arm at top position (pull-up, debounced) |
+| Motor Relay | PCF8575 P0 | Lifts pendulum arm (active-low) |
+| Actuator Relay | PCF8575 P1 | Releases pendulum latch (active-low) |
+| Endstop Switch | PCF8575 P2 | Detects arm at top position (active-low input; triggers PCF8575 INT) |
 | Metal Servo (14 V) | MCPWM / GPIO38 | 50 Hz PWM signal (3.3 V logic), motor power from dedicated 14 V supply |
 
 ```mermaid
@@ -23,10 +24,18 @@ graph LR
     DS1307("Tiny RTC (DS1307)\nI²C 0x68\n5V supply")
     SD("SD Card\nFAT32")
     AMP("I2S Amplifier\n+ Speaker")
-    MOTOR("Motor Relay")
-    ACTUATOR("Actuator Relay")
-    ENDSTOP("Endstop Switch")
     SERVO("Metal Servo\n14 V supply")
+
+    subgraph PCF ["PCF8575 I/O Expander (0x20, 5V)"]
+        P0["P0 · Motor Relay \u00ac"]
+        P1["P1 · Actuator Relay \u00ac"]
+        P2["P2 · Endstop input \u00ac"]
+        PCF_INT["~INT"]
+    end
+
+    MOTOR_RELAY("Motor Relay")
+    ACT_RELAY("Actuator Relay")
+    ENDSTOP("Endstop Switch")
 
     subgraph LS ["BSS138 Level Shifter"]
         LV_SDA["LV · SDA\n3.3V side"]
@@ -45,9 +54,7 @@ graph LR
         I2S_BCLK["IO22 · BCLK"]
         I2S_DOUT["IO23 · DOUT"]
         AMP_EN["IO30 · AMP_EN ¬"]
-        IO47["IO47"]
-        IO48["IO48"]
-        IO33["IO33 · pull-up"]
+        IO33["IO33 · PCF INT"]
         IO38["IO38 · MCPWM"]
     end
 
@@ -57,6 +64,12 @@ graph LR
     HV_SCL --- AS5600
     HV_SDA --- DS1307
     HV_SCL --- DS1307
+    HV_SDA --- PCF
+    HV_SCL --- PCF
+    P0 --- MOTOR_RELAY
+    P1 --- ACT_RELAY
+    P2 --- ENDSTOP
+    PCF_INT --- IO33
     SD --- SD_CMD
     SD --- SD_CLK
     SD --- SD_D0
@@ -64,13 +77,10 @@ graph LR
     AMP --- I2S_BCLK
     AMP --- I2S_DOUT
     AMP --- AMP_EN
-    MOTOR --- IO47
-    ACTUATOR --- IO48
-    ENDSTOP --- IO33
     SERVO --- IO38
 ```
 
-> **Note:** Both the AS5600 and Tiny RTC (DS1307) are 5V devices and share the HV side of the BSS138 level shifter. The ESP32 I2C bus (IO45/IO46, 3.3V) connects to the LV side. The metal servo runs from a **separate 14 V supply** — only GND and the 3.3 V PWM signal (IO38, 470 Ω series resistor recommended) connect to the ESP32. `¬` = active-low. `pull-up` = internal pull-up, active-low signal.
+> **Note:** The PCF8575, AS5600, and Tiny RTC are all **5V** devices on the HV side of the level shifter. IO45/IO46 (3.3V, LV side) is the only I2C connection to the ESP32. GPIO47 and GPIO48 are now free. PCF8575 P3–P15 are reserved for future expansion. `¬` = active-low. The servo runs from a separate 14 V rail; only GND and the 3.3 V PWM signal (IO38, 470 Ω series resistor recommended) connect to the ESP32.
 
 ## Software Stack
 
