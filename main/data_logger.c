@@ -124,8 +124,13 @@ static void parse_csv_line(const char *line, void *user_data)
     if (strncmp(line, "timestamp", 9) == 0)
         return;
 
-    if (history_count >= HISTORY_CACHE_SIZE)
-        return;
+    if (history_count >= HISTORY_CACHE_SIZE) {
+        /* Evict the oldest record to make room — keeps the cache as the
+         * HISTORY_CACHE_SIZE most-recent results in chronological order. */
+        memmove(&history_cache[0], &history_cache[1],
+                (HISTORY_CACHE_SIZE - 1) * sizeof(test_result_t));
+        history_count = HISTORY_CACHE_SIZE - 1;
+    }
 
     test_result_t *r = &history_cache[history_count];
     memset(r, 0, sizeof(test_result_t));
@@ -186,8 +191,11 @@ esp_err_t data_logger_load_history(void)
     /* Sort alphabetically so CHARPY_YYYYMMDD order = chronological order */
     qsort(csv_files, file_count, sizeof(csv_files[0]), compare_str);
 
-    /* Load from most recent files until cache is full */
-    for (int i = file_count - 1; i >= 0 && history_count < HISTORY_CACHE_SIZE; i--) {
+    /* Load oldest files first so that cache[0] = oldest, cache[N-1] = newest.
+     * parse_csv_line evicts the oldest entry when the cache overflows, so
+     * after the loop the cache holds the HISTORY_CACHE_SIZE most-recent records
+     * in chronological order — matching the newest-first reversal in update_table(). */
+    for (int i = 0; i < file_count; i++) {
         DL_INFO("Loading history from %s", csv_files[i]);
         sdcard_read_lines(csv_files[i], parse_csv_line, NULL);
     }
