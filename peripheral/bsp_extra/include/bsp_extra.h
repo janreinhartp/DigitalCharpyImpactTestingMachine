@@ -7,7 +7,6 @@
 #include <stdint.h>      // Standard C library for fixed-width integer types
 #include "esp_log.h"     // ESP-IDF logging library for debug/info/error logs
 #include "esp_err.h"     // ESP-IDF error code definitions and handling utilities
-#include "driver/gpio.h" // ESP-IDF GPIO driver (used for PCF8575 INT pin)
 #include "bsp_pcf8575.h" // PCF8575 16-bit I2C I/O expander driver
 
 /*——————————————————————————————————————Header file declaration end——————————————————————————————————————*/
@@ -20,13 +19,15 @@
 #define EXTRA_ERROR(fmt, ...) ESP_LOGE(EXTRA_TAG, fmt, ##__VA_ARGS__)  // Macro for error-level logging with tag "EXTRA"
 
 /* PCF8575 pin assignments */
-#define PCF8575_PIN_MOTOR_RELAY     PCF8575_P0  /* Motor relay   (active-low output) */
-#define PCF8575_PIN_ACTUATOR_RELAY  PCF8575_P1  /* Actuator relay (active-low output) */
-#define PCF8575_PIN_ENDSTOP         PCF8575_P2  /* Endstop switch (active-low input)  */
-/* P3–P15 reserved for future expansion */
+#define PCF8575_PIN_MOTOR_FWD    PCF8575_P0  /* Motor forward   (active-low output) */
+#define PCF8575_PIN_MOTOR_REV    PCF8575_P1  /* Motor reverse   (active-low output) */
+#define PCF8575_PIN_SAFETY_LOCK  PCF8575_P2  /* Safety lock     (active-low output) */
+#define PCF8575_PIN_RELEASE      PCF8575_P3  /* Release latch   (active-low output) */
+/* P4–P15 reserved for future expansion */
 
-/* ESP32 GPIO wired to PCF8575 ~INT (open-drain, active-low) */
-#define PCF8575_GPIO_INT            33
+/* Endstop GPIO pins (direct ESP32 GPIOs, active-low with internal pull-up) */
+#define ENDSTOP_TOP_GPIO    50  /* Top endstop    — arm at armed/raised position */
+#define ENDSTOP_BOT_GPIO    51  /* Bottom endstop — arm at home/lowered position */
 
 /* Endstop callback type */
 typedef void (*endstop_callback_t)(bool pressed);
@@ -35,17 +36,24 @@ typedef void (*endstop_callback_t)(bool pressed);
 esp_err_t gpio_extra_init(void);
 esp_err_t gpio_extra_set_level(bool level);
 
-/* Relay control */
+/* Relay / output control */
 esp_err_t relay_init(void);
-esp_err_t motor_relay_set(bool on);
-esp_err_t actuator_relay_set(bool on);
-bool motor_relay_get(void);
-bool actuator_relay_get(void);
+esp_err_t motor_forward_set(bool on);
+esp_err_t motor_reverse_set(bool on);
+esp_err_t release_set(bool on);
+esp_err_t safety_lock_set(bool on);
+bool motor_forward_get(void);
+bool motor_reverse_get(void);
+bool release_get(void);
+bool safety_lock_get(void);
 
-/* Endstop switch */
+/* Endstop switches */
 esp_err_t endstop_init(void);
-bool endstop_is_pressed(void);
+bool endstop_top_is_pressed(void);
+bool endstop_bot_is_pressed(void);
+bool endstop_is_pressed(void);          /* alias for endstop_top_is_pressed() */
 esp_err_t endstop_register_callback(endstop_callback_t cb);
+esp_err_t endstop_bot_register_callback(endstop_callback_t cb);
 
 /*———————————————————————————————————————Variable declaration end——————————————-—————————————————————————*/
 #endif

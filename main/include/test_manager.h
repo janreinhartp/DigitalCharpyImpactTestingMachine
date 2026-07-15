@@ -11,6 +11,11 @@
 typedef enum {
     TEST_STATE_IDLE = 0,
     TEST_STATE_SPECIMEN_ENTRY,
+    TEST_STATE_HOMING,          /**< Motor reversing to bottom endstop          */
+    TEST_STATE_HOMED_FWD,       /**< Motor forward 2 s after bottom hit         */
+    TEST_STATE_LATCH_OPENING,   /**< Release latch open for latch_open_ms       */
+    TEST_STATE_RETURNING_HOME,  /**< Motor reversing to bottom endstop again    */
+    TEST_STATE_LATCHED,         /**< Latch closed, settling before arming       */
     TEST_STATE_ARMING,
     TEST_STATE_ARMED,
     TEST_STATE_RELEASED,
@@ -98,6 +103,11 @@ void test_manager_register_state_cb(test_state_cb_t cb);
 esp_err_t test_manager_set_config(const pendulum_config_t *config);
 
 /**
+ * @brief Persist the current configuration (pendulum params + angle cal) to NVS
+ */
+esp_err_t test_manager_save_config(void);
+
+/**
  * @brief Get current pendulum configuration
  */
 const pendulum_config_t *test_manager_get_config(void);
@@ -106,5 +116,41 @@ const pendulum_config_t *test_manager_get_config(void);
  * @brief Called by endstop ISR callback when arm reaches top position
  */
 void test_manager_endstop_triggered(bool pressed);
+
+/**
+ * @brief Get the saved brake servo target angle (degrees)
+ */
+float test_manager_get_brake_angle(void);
+
+/**
+ * @brief Set and persist the brake servo target angle (degrees, 0–180)
+ */
+esp_err_t test_manager_set_brake_angle(float angle_deg);
+
+/**
+ * @brief Get the brake hold time (ms) before the servo retracts to home
+ */
+uint32_t test_manager_get_brake_hold_ms(void);
+
+/**
+ * @brief Set and persist the brake hold time in milliseconds (100–30000 ms)
+ */
+esp_err_t test_manager_set_brake_hold_ms(uint32_t ms);
+
+/**
+ * @brief Get the latch open time (ms) — how long the release stays open during homing
+ */
+uint32_t test_manager_get_latch_open_ms(void);
+
+/**
+ * @brief Set and persist the latch open time in milliseconds (500–30000 ms)
+ */
+esp_err_t test_manager_set_latch_open_ms(uint32_t ms);
+
+/**
+ * @brief Get the current homing sub-step description (for live UI display).
+ *        Returns a short C string; empty string when idle.
+ */
+const char *test_manager_get_detail_text(void);
 
 #endif

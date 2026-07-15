@@ -29,6 +29,7 @@ extern lv_style_t style_card;
 extern lv_style_t style_btn_primary;
 extern lv_style_t style_btn_secondary;
 extern lv_style_t style_btn_danger;
+extern lv_style_t style_btn_warning;
 extern lv_style_t style_input;
 
 /*——————————————— Screen Objects ———————————————*/
@@ -37,6 +38,10 @@ extern lv_obj_t *scr_specimen;
 extern lv_obj_t *scr_test_active;
 extern lv_obj_t *scr_history;
 extern lv_obj_t *scr_settings;
+extern lv_obj_t *scr_dbtt_setup;
+extern lv_obj_t *scr_dbtt_run;
+extern lv_obj_t *scr_dbtt_result;
+extern lv_obj_t *scr_dbtt_history;
 
 /*——————————————— Status Bar Labels (updated from main loop) ————*/
 extern lv_obj_t *ui_status_time_label;
@@ -70,6 +75,7 @@ extern lv_obj_t *ui_spec_keyboard;
 extern lv_obj_t *ui_test_arc;
 extern lv_obj_t *ui_test_angle_label;
 extern lv_obj_t *ui_test_state_label;
+extern lv_obj_t *ui_test_detail_label;   /* homing sub-step description */
 extern lv_obj_t *ui_test_progress_dots[4];
 extern lv_obj_t *ui_test_result_angle_label;
 extern lv_obj_t *ui_test_result_energy_label;
@@ -83,6 +89,9 @@ extern lv_obj_t *ui_test_result_panel;
 extern lv_obj_t *ui_hist_table;
 extern lv_obj_t *ui_hist_count;
 extern lv_obj_t *ui_hist_page;
+
+/*——————————————— DBTT Widgets ———————————————*/
+/* (widget handles are static within their respective .c files) */
 
 /*——————————————— Settings Widgets ———————————————*/
 extern lv_obj_t *ui_set_mass_ta;
@@ -101,6 +110,11 @@ void ui_show_specimen(void);
 void ui_show_test_active(void);
 void ui_show_history(void);
 void ui_show_settings(void);
+void ui_show_dbtt(void);                  /* -> scr_dbtt_setup */
+void ui_show_dbtt_run(void);              /* -> scr_dbtt_run    (refresh + load) */
+void ui_show_dbtt_result(void);           /* -> scr_dbtt_result (refresh + load) */
+void ui_show_dbtt_history(void);          /* -> scr_dbtt_history (refresh + load) */
+void ui_show_dbtt_result_history(void);   /* -> scr_dbtt_result  (history mode)   */
 
 /*——————————————— Screen Constructors ———————————————*/
 void ui_dashboard_create(void);
@@ -108,6 +122,10 @@ void ui_specimen_create(void);
 void ui_test_active_create(void);
 void ui_history_create(void);
 void ui_settings_create(void);
+void ui_dbtt_setup_create(void);
+void ui_dbtt_run_create(void);
+void ui_dbtt_result_create(void);
+void ui_dbtt_history_create(void);
 void ui_create_screen_status_bar(lv_obj_t *screen);
 
 /*——————————————— UI Update Helpers ———————————————*/
@@ -115,6 +133,9 @@ void ui_update_status_bar(const char *time_str, const char *date_str,
                           const char *state_str, lv_color_t dot_color, bool sd_ok);
 void ui_test_active_set_state(int state);
 void ui_history_refresh(void);
+void ui_dbtt_run_refresh(void);
+void ui_dbtt_result_refresh(void);
+void ui_dbtt_history_refresh(void);
 
 #ifdef __cplusplus
 }

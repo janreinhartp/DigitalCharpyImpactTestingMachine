@@ -1,4 +1,5 @@
 FILE(GLOB_RECURSE main ${CMAKE_SOURCE_DIR}/main/*.c)
+# ui_dbtt_history.c added
 
 idf_component_register(SRCS ${main}
                         INCLUDE_DIRS "include" "ui"

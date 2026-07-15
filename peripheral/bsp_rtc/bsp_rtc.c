@@ -17,15 +17,22 @@ static uint8_t dec_to_bcd(uint8_t dec)
 
 esp_err_t rtc_init(void)
 {
-    ds1307_dev = i2c_dev_register(DS1307_I2C_ADDR);
-    if (ds1307_dev == NULL) {
-        RTC_ERROR("Failed to register DS1307 on I2C bus");
+    /* DS1307 is a 100 kHz max device — do NOT use the generic i2c_dev_register()
+     * helper which hardcodes 400 kHz.  Register it directly at 100 kHz. */
+    i2c_device_config_t ds_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address  = DS1307_I2C_ADDR,
+        .scl_speed_hz    = 100000,
+    };
+    esp_err_t err = i2c_master_bus_add_device(i2c_bus_handle, &ds_cfg, &ds1307_dev);
+    if (err != ESP_OK || ds1307_dev == NULL) {
+        RTC_ERROR("Failed to register DS1307 on I2C bus: %s", esp_err_to_name(err));
         return ESP_FAIL;
     }
 
     /* Read seconds register — bit 7 is the Clock Halt (CH) bit */
     uint8_t seconds;
-    esp_err_t err = i2c_read_reg(ds1307_dev, DS1307_REG_SECONDS, &seconds, 1);
+    err = i2c_read_reg(ds1307_dev, DS1307_REG_SECONDS, &seconds, 1);
     if (err != ESP_OK) {
         RTC_ERROR("Failed to read DS1307 seconds register");
         return err;

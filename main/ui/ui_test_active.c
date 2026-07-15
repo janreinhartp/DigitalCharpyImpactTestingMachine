@@ -1,10 +1,12 @@
 #include "ui.h"
 #include "test_manager.h"
+#include "dbtt_manager.h"
 
 /* Test active widgets */
 lv_obj_t *ui_test_arc = NULL;
 lv_obj_t *ui_test_angle_label = NULL;
 lv_obj_t *ui_test_state_label = NULL;
+lv_obj_t *ui_test_detail_label = NULL;
 lv_obj_t *ui_test_progress_dots[4] = {NULL};
 lv_obj_t *ui_test_result_angle_label = NULL;
 lv_obj_t *ui_test_result_energy_label = NULL;
@@ -20,8 +22,27 @@ extern void ui_create_screen_status_bar(lv_obj_t *screen);
 
 static void btn_release_cb(lv_event_t *e) { (void)e; test_manager_release(); }
 static void btn_abort_cb(lv_event_t *e)   { (void)e; test_manager_abort(); ui_show_dashboard(); }
-static void btn_save_cb(lv_event_t *e)    { (void)e; test_manager_save_result(); ui_show_dashboard(); }
-static void btn_discard_cb(lv_event_t *e) { (void)e; test_manager_discard_result(); ui_show_dashboard(); }
+
+/* "DONE" — result is already auto-saved; navigate based on session state */
+static void btn_done_cb(lv_event_t *e)
+{
+    (void)e;
+    const dbtt_session_t *sess = dbtt_manager_get_session();
+    bool dbtt_all_done = (!dbtt_manager_is_active() &&
+                          sess->n_done > 0 &&
+                          sess->n_done >= sess->n_planned);
+    bool dbtt_more = dbtt_manager_is_active();
+
+    test_manager_discard_result();   /* transition state machine back to IDLE */
+
+    if (dbtt_all_done) {
+        ui_show_dbtt_result();       /* all DBTT tests done — show curve */
+    } else if (dbtt_more) {
+        ui_show_dbtt_run();          /* next test in DBTT session */
+    } else {
+        ui_show_dashboard();
+    }
+}
 
 void ui_test_active_create(void)
 {
@@ -91,6 +112,21 @@ void ui_test_active_create(void)
     lv_label_set_text(ui_test_state_label, "ARMING - Lifting arm... Stand clear.");
     lv_obj_set_style_text_color(ui_test_state_label, UI_COLOR_TEXT, 0);
     lv_obj_set_style_text_font(ui_test_state_label, &lv_font_montserrat_20, 0);
+
+    /* ——— Detail / sub-step label (below state bar) ——— */
+    lv_obj_t *detail_cont = lv_obj_create(content);
+    lv_obj_set_size(detail_cont, 900, 32);
+    lv_obj_align(detail_cont, LV_ALIGN_TOP_MID, 0, 374);
+    lv_obj_set_style_bg_opa(detail_cont, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(detail_cont, 0, 0);
+    lv_obj_set_style_pad_all(detail_cont, 0, 0);
+    lv_obj_clear_flag(detail_cont, LV_OBJ_FLAG_SCROLLABLE);
+
+    ui_test_detail_label = lv_label_create(detail_cont);
+    lv_label_set_text(ui_test_detail_label, "");
+    lv_obj_set_style_text_font(ui_test_detail_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(ui_test_detail_label, UI_COLOR_TEXT_MUTED, 0);
+    lv_obj_align(ui_test_detail_label, LV_ALIGN_LEFT_MID, 4, 0);
 
     /* ——— Result panel (hidden until COMPLETE) ——— */
     ui_test_result_panel = lv_obj_create(content);
@@ -170,33 +206,22 @@ void ui_test_active_create(void)
     lv_obj_set_style_text_font(abort_lbl, &lv_font_montserrat_20, 0);
     lv_obj_center(abort_lbl);
 
-    /* Save button */
-    ui_test_btn_save = lv_btn_create(action_area);
-    lv_obj_set_size(ui_test_btn_save, 280, 56);
-    lv_obj_set_style_bg_color(ui_test_btn_save, UI_COLOR_SUCCESS, 0);
-    lv_obj_set_style_bg_opa(ui_test_btn_save, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(ui_test_btn_save, 8, 0);
-    lv_obj_add_event_cb(ui_test_btn_save, btn_save_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *save_lbl = lv_label_create(ui_test_btn_save);
-    lv_label_set_text(save_lbl, LV_SYMBOL_OK " SAVE RESULT");
-    lv_obj_set_style_text_font(save_lbl, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_color(save_lbl, UI_COLOR_BG, 0);
-    lv_obj_center(save_lbl);
-    lv_obj_add_flag(ui_test_btn_save, LV_OBJ_FLAG_HIDDEN);
+    /* Save button — removed (results are auto-saved on completion) */
+    ui_test_btn_save = NULL;
 
-    /* Discard button */
+    /* DONE button (was Discard — result is already saved, just navigate away) */
     ui_test_btn_discard = lv_btn_create(action_area);
     lv_obj_add_style(ui_test_btn_discard, &style_btn_danger, 0);
     lv_obj_set_size(ui_test_btn_discard, 200, 56);
-    lv_obj_add_event_cb(ui_test_btn_discard, btn_discard_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(ui_test_btn_discard, btn_done_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *disc_lbl = lv_label_create(ui_test_btn_discard);
-    lv_label_set_text(disc_lbl, LV_SYMBOL_CLOSE " DISCARD");
+    lv_label_set_text(disc_lbl, LV_SYMBOL_OK " DONE");
     lv_obj_set_style_text_font(disc_lbl, &lv_font_montserrat_20, 0);
     lv_obj_center(disc_lbl);
     lv_obj_add_flag(ui_test_btn_discard, LV_OBJ_FLAG_HIDDEN);
 
-    /* Default view: ARMING (abort only) */
-    ui_test_active_set_state(TEST_STATE_ARMING);
+    /* Default view: HOMING (abort only) */
+    ui_test_active_set_state(TEST_STATE_HOMING);
 }
 
 void ui_test_active_set_state(int state)
@@ -207,6 +232,26 @@ void ui_test_active_set_state(int state)
     const char *msg = "";
 
     switch (state) {
+        case TEST_STATE_HOMING:
+            filled = 1; arc_color = UI_COLOR_WARNING;
+            msg = "HOMING - Moving arm to home position...";
+            break;
+        case TEST_STATE_HOMED_FWD:
+            filled = 1; arc_color = UI_COLOR_WARNING;
+            msg = "HOMING - Indexing forward...";
+            break;
+        case TEST_STATE_LATCH_OPENING:
+            filled = 1; arc_color = UI_COLOR_WARNING;
+            msg = "LATCHING - Opening release latch...";
+            break;
+        case TEST_STATE_RETURNING_HOME:
+            filled = 1; arc_color = UI_COLOR_WARNING;
+            msg = "LATCHING - Returning to home...";
+            break;
+        case TEST_STATE_LATCHED:
+            filled = 1; arc_color = UI_COLOR_WARNING;
+            msg = "LATCHED - Pendulum latched, arming...";
+            break;
         case TEST_STATE_ARMING:
             filled = 1; arc_color = UI_COLOR_WARNING;
             msg = "ARMING - Lifting arm... Stand clear.";
@@ -223,6 +268,7 @@ void ui_test_active_set_state(int state)
         case TEST_STATE_COMPLETE:
             filled = 4; arc_color = UI_COLOR_PRIMARY;
             msg = "COMPLETE - Test complete. Review results.";
+            if (ui_test_detail_label) lv_label_set_text(ui_test_detail_label, "");
             break;
         default:
             break;
@@ -237,9 +283,14 @@ void ui_test_active_set_state(int state)
 
     /* Show/hide buttons based on state */
     bool show_release = (state == TEST_STATE_ARMED);
-    bool show_abort   = (state == TEST_STATE_ARMING || state == TEST_STATE_ARMED);
-    bool show_save    = (state == TEST_STATE_COMPLETE);
-    bool show_discard = (state == TEST_STATE_COMPLETE);
+    bool show_abort   = (state == TEST_STATE_HOMING      ||
+                         state == TEST_STATE_HOMED_FWD   ||
+                         state == TEST_STATE_LATCH_OPENING ||
+                         state == TEST_STATE_RETURNING_HOME ||
+                         state == TEST_STATE_LATCHED     ||
+                         state == TEST_STATE_ARMING      ||
+                         state == TEST_STATE_ARMED);
+    bool show_done    = (state == TEST_STATE_COMPLETE);
     bool show_result  = (state == TEST_STATE_COMPLETE);
 
     if (show_release) lv_obj_remove_flag(ui_test_btn_release, LV_OBJ_FLAG_HIDDEN);
@@ -248,10 +299,7 @@ void ui_test_active_set_state(int state)
     if (show_abort) lv_obj_remove_flag(ui_test_btn_abort, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(ui_test_btn_abort, LV_OBJ_FLAG_HIDDEN);
 
-    if (show_save) lv_obj_remove_flag(ui_test_btn_save, LV_OBJ_FLAG_HIDDEN);
-    else lv_obj_add_flag(ui_test_btn_save, LV_OBJ_FLAG_HIDDEN);
-
-    if (show_discard) lv_obj_remove_flag(ui_test_btn_discard, LV_OBJ_FLAG_HIDDEN);
+    if (show_done) lv_obj_remove_flag(ui_test_btn_discard, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(ui_test_btn_discard, LV_OBJ_FLAG_HIDDEN);
 
     if (show_result) lv_obj_remove_flag(ui_test_result_panel, LV_OBJ_FLAG_HIDDEN);

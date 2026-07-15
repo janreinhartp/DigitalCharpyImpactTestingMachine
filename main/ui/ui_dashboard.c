@@ -16,6 +16,7 @@ extern void ui_create_screen_status_bar(lv_obj_t *screen);
 static void btn_new_test_cb(lv_event_t *e) { (void)e; ui_show_specimen(); }
 static void btn_history_cb(lv_event_t *e)  { (void)e; ui_show_history(); }
 static void btn_settings_cb(lv_event_t *e) { (void)e; ui_show_settings(); }
+static void btn_dbtt_cb(lv_event_t *e)     { (void)e; ui_show_dbtt(); }
 
 void ui_dashboard_create(void)
 {
@@ -170,7 +171,7 @@ void ui_dashboard_create(void)
     /* NEW TEST button */
     lv_obj_t *btn_new = lv_btn_create(nav);
     lv_obj_add_style(btn_new, &style_btn_primary, 0);
-    lv_obj_set_size(btn_new, 300, 56);
+    lv_obj_set_size(btn_new, 230, 56);
     lv_obj_add_event_cb(btn_new, btn_new_test_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *lbl_new = lv_label_create(btn_new);
     lv_label_set_text(lbl_new, LV_SYMBOL_PLAY " NEW TEST");
@@ -180,17 +181,27 @@ void ui_dashboard_create(void)
     /* HISTORY button */
     lv_obj_t *btn_hist = lv_btn_create(nav);
     lv_obj_add_style(btn_hist, &style_btn_secondary, 0);
-    lv_obj_set_size(btn_hist, 250, 56);
+    lv_obj_set_size(btn_hist, 200, 56);
     lv_obj_add_event_cb(btn_hist, btn_history_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *lbl_hist = lv_label_create(btn_hist);
     lv_label_set_text(lbl_hist, LV_SYMBOL_LIST " HISTORY");
     lv_obj_set_style_text_font(lbl_hist, &lv_font_montserrat_20, 0);
     lv_obj_center(lbl_hist);
 
+    /* DBTT button */
+    lv_obj_t *btn_dbtt = lv_btn_create(nav);
+    lv_obj_add_style(btn_dbtt, &style_btn_secondary, 0);
+    lv_obj_set_size(btn_dbtt, 200, 56);
+    lv_obj_add_event_cb(btn_dbtt, btn_dbtt_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *lbl_dbtt = lv_label_create(btn_dbtt);
+    lv_label_set_text(lbl_dbtt, "DBTT");
+    lv_obj_set_style_text_font(lbl_dbtt, &lv_font_montserrat_20, 0);
+    lv_obj_center(lbl_dbtt);
+
     /* SETTINGS button */
     lv_obj_t *btn_set = lv_btn_create(nav);
     lv_obj_add_style(btn_set, &style_btn_secondary, 0);
-    lv_obj_set_size(btn_set, 250, 56);
+    lv_obj_set_size(btn_set, 200, 56);
     lv_obj_set_style_text_color(btn_set, UI_COLOR_TEXT_SEC, 0);
     lv_obj_set_style_border_color(btn_set, UI_COLOR_TEXT_SEC, 0);
     lv_obj_add_event_cb(btn_set, btn_settings_cb, LV_EVENT_CLICKED, NULL);

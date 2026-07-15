@@ -5,6 +5,7 @@ lv_style_t style_card;
 lv_style_t style_btn_primary;
 lv_style_t style_btn_secondary;
 lv_style_t style_btn_danger;
+lv_style_t style_btn_warning;
 lv_style_t style_input;
 
 /*——————————————— Screen Objects ———————————————*/
@@ -13,6 +14,10 @@ lv_obj_t *scr_specimen     = NULL;
 lv_obj_t *scr_test_active  = NULL;
 lv_obj_t *scr_history      = NULL;
 lv_obj_t *scr_settings     = NULL;
+lv_obj_t *scr_dbtt_setup   = NULL;
+lv_obj_t *scr_dbtt_run     = NULL;
+lv_obj_t *scr_dbtt_result  = NULL;
+lv_obj_t *scr_dbtt_history = NULL;
 
 /*——————————————— Status Bar ———————————————*/
 lv_obj_t *ui_status_time_label  = NULL;
@@ -62,6 +67,17 @@ static void init_styles(void)
     lv_style_set_radius(&style_btn_danger, 8);
     lv_style_set_pad_ver(&style_btn_danger, 12);
     lv_style_set_pad_hor(&style_btn_danger, 24);
+
+    /* Warning button */
+    lv_style_init(&style_btn_warning);
+    lv_style_set_bg_color(&style_btn_warning, UI_COLOR_SURFACE);
+    lv_style_set_bg_opa(&style_btn_warning, LV_OPA_COVER);
+    lv_style_set_border_color(&style_btn_warning, UI_COLOR_WARNING);
+    lv_style_set_border_width(&style_btn_warning, 2);
+    lv_style_set_text_color(&style_btn_warning, UI_COLOR_WARNING);
+    lv_style_set_radius(&style_btn_warning, 8);
+    lv_style_set_pad_ver(&style_btn_warning, 12);
+    lv_style_set_pad_hor(&style_btn_warning, 24);
 
     /* Input field */
     lv_style_init(&style_input);
@@ -129,9 +145,9 @@ static void create_status_bar(lv_obj_t *parent)
     lv_obj_set_style_pad_ver(ui_status_state_label, 4, 0);
     lv_obj_set_style_radius(ui_status_state_label, 10, 0);
 
-    /* Right: time + date + SD */
+    /* Right: time + date + SD — fixed width so flex layout never clips it */
     lv_obj_t *right = lv_obj_create(bar);
-    lv_obj_set_size(right, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_size(right, 300, LV_SIZE_CONTENT);
     lv_obj_set_style_bg_opa(right, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(right, 0, 0);
     lv_obj_set_style_pad_all(right, 0, 0);
@@ -173,6 +189,24 @@ void ui_init(void)
     ui_test_active_create();
     ui_history_create();
     ui_settings_create();
+    ui_dbtt_setup_create();
+    ui_dbtt_run_create();
+    ui_dbtt_result_create();
+    ui_dbtt_history_create();
+
+    /*
+     * Create the status bar ONCE on the LVGL top layer so it is always
+     * visible above every screen.  The global widget pointers
+     * (ui_status_time_label, etc.) are set here and never overwritten.
+     *
+     * lv_layer_top() inherits the active theme's default padding — clear it
+     * so the bar sits flush at (0,0) and is not clipped.
+     */
+    lv_obj_t *top_layer = lv_layer_top();
+    lv_obj_set_style_pad_all(top_layer, 0, 0);
+    lv_obj_set_style_border_width(top_layer, 0, 0);
+    lv_obj_clear_flag(top_layer, LV_OBJ_FLAG_SCROLLABLE);
+    create_status_bar(top_layer);
 
     /* Show dashboard by default */
     ui_show_dashboard();
@@ -195,12 +229,43 @@ void ui_show_test_active(void)
 
 void ui_show_history(void)
 {
+    ui_history_refresh();
     lv_scr_load_anim(scr_history, LV_SCR_LOAD_ANIM_FADE_IN, 200, 0, false);
 }
 
 void ui_show_settings(void)
 {
     lv_scr_load_anim(scr_settings, LV_SCR_LOAD_ANIM_FADE_IN, 200, 0, false);
+}
+
+/* DBTT navigation */
+void ui_show_dbtt(void)
+{
+    lv_scr_load_anim(scr_dbtt_setup, LV_SCR_LOAD_ANIM_FADE_IN, 200, 0, false);
+}
+
+void ui_show_dbtt_run(void)
+{
+    ui_dbtt_run_refresh();
+    lv_scr_load_anim(scr_dbtt_run, LV_SCR_LOAD_ANIM_FADE_IN, 200, 0, false);
+}
+
+void ui_show_dbtt_result(void)
+{
+    ui_dbtt_result_refresh();
+    lv_scr_load_anim(scr_dbtt_result, LV_SCR_LOAD_ANIM_FADE_IN, 200, 0, false);
+}
+
+void ui_show_dbtt_history(void)
+{
+    ui_dbtt_history_refresh();
+    lv_scr_load_anim(scr_dbtt_history, LV_SCR_LOAD_ANIM_FADE_IN, 200, 0, false);
+}
+
+void ui_show_dbtt_result_history(void)
+{
+    /* ui_dbtt_result_load() was already called — just navigate */
+    lv_scr_load_anim(scr_dbtt_result, LV_SCR_LOAD_ANIM_FADE_IN, 200, 0, false);
 }
 
 void ui_update_status_bar(const char *time_str, const char *date_str,
@@ -221,8 +286,9 @@ void ui_update_status_bar(const char *time_str, const char *date_str,
     }
 }
 
-/* Status bar factory — each screen calls this */
+/* Status bar lives on lv_layer_top() — this shim keeps existing screen
+ * constructors compilable without creating duplicate bars. */
 void ui_create_screen_status_bar(lv_obj_t *screen)
 {
-    create_status_bar(screen);
+    (void)screen;
 }

@@ -7,6 +7,11 @@
 #include <stdlib.h>
 #include <dirent.h>
 
+static int compare_str(const void *a, const void *b)
+{
+    return strcmp((const char *)a, (const char *)b);
+}
+
 #define DL_TAG "DATA_LOG"
 #define DL_INFO(fmt, ...) ESP_LOGI(DL_TAG, fmt, ##__VA_ARGS__)
 #define DL_ERROR(fmt, ...) ESP_LOGE(DL_TAG, fmt, ##__VA_ARGS__)
@@ -47,8 +52,23 @@ esp_err_t data_logger_write_result(const test_result_t *result)
 {
     if (result == NULL)
         return ESP_ERR_INVALID_ARG;
-    if (!sdcard_is_mounted())
+
+    /* Always add to in-memory cache regardless of SD card state */
+    if (history_count < HISTORY_CACHE_SIZE) {
+        history_cache[history_count] = *result;
+        history_count++;
+    } else {
+        /* Shift array left by 1, drop oldest */
+        memmove(&history_cache[0], &history_cache[1],
+                (HISTORY_CACHE_SIZE - 1) * sizeof(test_result_t));
+        history_cache[HISTORY_CACHE_SIZE - 1] = *result;
+    }
+
+    /* Write to SD card if available */
+    if (!sdcard_is_mounted()) {
+        DL_ERROR("SD card not mounted — result cached in RAM only (%d cached)", history_count);
         return ESP_ERR_INVALID_STATE;
+    }
 
     char filepath[64];
     build_filepath(filepath, sizeof(filepath));
@@ -79,17 +99,6 @@ esp_err_t data_logger_write_result(const test_result_t *result)
     if (err != ESP_OK) {
         DL_ERROR("Failed to write to %s", filepath);
         return err;
-    }
-
-    /* Add to history cache (circular, newest at end) */
-    if (history_count < HISTORY_CACHE_SIZE) {
-        history_cache[history_count] = *result;
-        history_count++;
-    } else {
-        /* Shift array left by 1, drop oldest */
-        memmove(&history_cache[0], &history_cache[1],
-                (HISTORY_CACHE_SIZE - 1) * sizeof(test_result_t));
-        history_cache[HISTORY_CACHE_SIZE - 1] = *result;
     }
 
     DL_INFO("Result logged to %s (%d cached)", filepath, history_count);
@@ -173,6 +182,9 @@ esp_err_t data_logger_load_history(void)
         }
     }
     closedir(dir);
+
+    /* Sort alphabetically so CHARPY_YYYYMMDD order = chronological order */
+    qsort(csv_files, file_count, sizeof(csv_files[0]), compare_str);
 
     /* Load from most recent files until cache is full */
     for (int i = file_count - 1; i >= 0 && history_count < HISTORY_CACHE_SIZE; i--) {
