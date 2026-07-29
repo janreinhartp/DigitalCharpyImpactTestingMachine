@@ -36,8 +36,8 @@
 
 /* Homing sequence timing */
 #define HOMED_FORWARD_MS            3000   /* Forward travel (ms) after hitting bottom endstop  */
-#define LATCH_SETTLE_MS             5000   /* Settle time (ms) after closing release latch      */
-#define SAFETY_LOCK_PRE_REVERSE_MS  5000   /* Hold safety lock engaged (ms) before each reverse */
+#define LATCH_SETTLE_MS             6000   /* Settle time (ms) after closing release latch      */
+#define SAFETY_LOCK_PRE_REVERSE_MS  8000   /* Hold safety lock engaged (ms) before each reverse */
 
 /* NVS storage keys */
 #define NVS_NAMESPACE      "charpy"
@@ -599,12 +599,13 @@ void test_manager_endstop_triggered(bool pressed)
     motor_forward_set(false);
     safety_lock_set(true);
 
-    /* Kill the soft-limit angle monitor task if it is still running */
-    if (s_arm_mon_task != NULL) {
-        TaskHandle_t h = s_arm_mon_task;
-        s_arm_mon_task = NULL;
-        vTaskDelete(h);
-    }
+    /* Signal the soft-limit angle monitor task to exit naturally.
+     * Do NOT force-kill it with vTaskDelete(): if the task is blocked inside
+     * adc_oneshot_read() when it is deleted, the ADC driver's internal arbiter
+     * lock is never released and every subsequent ADC read times out.
+     * The task's loop condition (current_state == TEST_STATE_ARMING) will cause
+     * it to exit cleanly once set_state(ARMED) is called below. */
+    s_arm_mon_task = NULL;   /* prevent double-free if task self-exits first */
 
     TM_INFO("Top endstop hit — motor OFF, safety lock ENGAGED");
 

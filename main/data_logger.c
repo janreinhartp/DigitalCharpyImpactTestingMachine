@@ -4,13 +4,6 @@
 #include "esp_log.h"
 #include <stdio.h>
 #include <string.h>
-#include <stdlib.h>
-#include <dirent.h>
-
-static int compare_str(const void *a, const void *b)
-{
-    return strcmp((const char *)a, (const char *)b);
-}
 
 #define DL_TAG "DATA_LOG"
 #define DL_INFO(fmt, ...) ESP_LOGI(DL_TAG, fmt, ##__VA_ARGS__)
@@ -163,44 +156,18 @@ esp_err_t data_logger_load_history(void)
 
     history_count = 0;
 
-    /* Scan /sdcard/ for CHARPY_*.csv files and load the most recent ones */
-    DIR *dir = opendir("/sdcard");
-    if (dir == NULL) {
-        DL_ERROR("Failed to open /sdcard directory");
-        return ESP_FAIL;
+    /* Load only today's file — one file per day */
+    char filepath[64];
+    build_filepath(filepath, sizeof(filepath));
+
+    if (!sdcard_file_exists(filepath)) {
+        DL_INFO("No history file for today (%s)", filepath);
+        return ESP_OK;
     }
 
-    /* Collect CHARPY CSV filenames (sorted by name = sorted by date) */
-    char csv_files[30][40];
-    int file_count = 0;
-
-    struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL && file_count < 30) {
-        if (strncmp(entry->d_name, "CHARPY_", 7) == 0 &&
-            strstr(entry->d_name, ".csv") != NULL &&
-            strlen(entry->d_name) < 32) {
-            csv_files[file_count][0] = '\0';
-            strncat(csv_files[file_count], "/sdcard/", sizeof(csv_files[0]) - 1);
-            strncat(csv_files[file_count], entry->d_name,
-                    sizeof(csv_files[0]) - strlen(csv_files[file_count]) - 1);
-            file_count++;
-        }
-    }
-    closedir(dir);
-
-    /* Sort alphabetically so CHARPY_YYYYMMDD order = chronological order */
-    qsort(csv_files, file_count, sizeof(csv_files[0]), compare_str);
-
-    /* Load oldest files first so that cache[0] = oldest, cache[N-1] = newest.
-     * parse_csv_line evicts the oldest entry when the cache overflows, so
-     * after the loop the cache holds the HISTORY_CACHE_SIZE most-recent records
-     * in chronological order — matching the newest-first reversal in update_table(). */
-    for (int i = 0; i < file_count; i++) {
-        DL_INFO("Loading history from %s", csv_files[i]);
-        sdcard_read_lines(csv_files[i], parse_csv_line, NULL);
-    }
-
-    DL_INFO("Loaded %d history records from SD card", history_count);
+    DL_INFO("Loading today's history from %s", filepath);
+    sdcard_read_lines(filepath, parse_csv_line, NULL);
+    DL_INFO("Loaded %d result(s) from today's file", history_count);
     return ESP_OK;
 }
 
