@@ -78,6 +78,17 @@ esp_err_t test_manager_save_result(void);
 esp_err_t test_manager_discard_result(void);
 
 /**
+ * @brief Returns true if the last result was voided (specimen not cut / timeout)
+ */
+bool test_manager_result_is_void(void);
+
+/**
+ * @brief Retry the test with the same specimen (COMPLETE+void → HOMING).
+ *        Only valid when test_manager_result_is_void() is true.
+ */
+esp_err_t test_manager_retry(void);
+
+/**
  * @brief Get the current live angle reading (updated by sampling task)
  */
 float test_manager_get_live_angle(void);

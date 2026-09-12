@@ -13,7 +13,9 @@ lv_obj_t *ui_test_result_energy_label = NULL;
 lv_obj_t *ui_test_btn_release = NULL;
 lv_obj_t *ui_test_btn_abort = NULL;
 lv_obj_t *ui_test_btn_save = NULL;
+lv_obj_t *ui_test_btn_save_void = NULL;
 lv_obj_t *ui_test_btn_discard = NULL;
+lv_obj_t *ui_test_btn_retry = NULL;
 lv_obj_t *ui_test_result_panel = NULL;
 
 static lv_obj_t *action_area = NULL;
@@ -23,7 +25,7 @@ extern void ui_create_screen_status_bar(lv_obj_t *screen);
 static void btn_release_cb(lv_event_t *e) { (void)e; test_manager_release(); }
 static void btn_abort_cb(lv_event_t *e)   { (void)e; test_manager_abort(); ui_show_dashboard(); }
 
-/* "DONE" — result is already auto-saved; navigate based on session state */
+/* "DONE" / "DISCARD" — navigate away, result was already auto-saved (or voided) */
 static void btn_done_cb(lv_event_t *e)
 {
     (void)e;
@@ -38,10 +40,36 @@ static void btn_done_cb(lv_event_t *e)
     if (dbtt_all_done) {
         ui_show_dbtt_result();       /* all DBTT tests done — show curve */
     } else if (dbtt_more) {
-        ui_show_dbtt_run();          /* next test in DBTT session */
+        ui_show_dbtt_run();          /* next DBTT test */
     } else {
         ui_show_dashboard();
     }
+}
+
+/* Retry the same specimen after a void (not-cut) result */
+static void btn_retry_cb(lv_event_t *e)
+{
+    (void)e;
+    test_manager_retry();   /* COMPLETE+void → HOMING, keeps current specimen */
+}
+
+/* Save a void (not-cut) result as a valid data point then navigate */
+static void btn_save_void_cb(lv_event_t *e)
+{
+    (void)e;
+    const dbtt_session_t *sess = dbtt_manager_get_session();
+    bool dbtt_was_active = dbtt_manager_is_active();
+
+    test_manager_save_result();
+
+    /* Session may have completed inside save — check both before and after */
+    bool dbtt_all_done = (dbtt_was_active && !dbtt_manager_is_active() &&
+                          sess->n_done >= sess->n_planned);
+    bool dbtt_more = dbtt_manager_is_active();
+
+    if (dbtt_all_done)  ui_show_dbtt_result();
+    else if (dbtt_more) ui_show_dbtt_run();
+    else                ui_show_dashboard();
 }
 
 void ui_test_active_create(void)
@@ -209,7 +237,21 @@ void ui_test_active_create(void)
     /* Save button — removed (results are auto-saved on completion) */
     ui_test_btn_save = NULL;
 
-    /* DONE button (was Discard — result is already saved, just navigate away) */
+    /* SAVE VOID button — visible only for not-cut results, lets operator record them */
+    ui_test_btn_save_void = lv_btn_create(action_area);
+    lv_obj_set_size(ui_test_btn_save_void, 200, 56);
+    lv_obj_set_style_bg_color(ui_test_btn_save_void, UI_COLOR_SUCCESS, 0);
+    lv_obj_set_style_bg_opa(ui_test_btn_save_void, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(ui_test_btn_save_void, 8, 0);
+    lv_obj_add_event_cb(ui_test_btn_save_void, btn_save_void_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *save_void_lbl = lv_label_create(ui_test_btn_save_void);
+    lv_label_set_text(save_void_lbl, LV_SYMBOL_SAVE " SAVE");
+    lv_obj_set_style_text_font(save_void_lbl, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(save_void_lbl, lv_color_hex(0x000000), 0);
+    lv_obj_center(save_void_lbl);
+    lv_obj_add_flag(ui_test_btn_save_void, LV_OBJ_FLAG_HIDDEN);
+
+    /* DONE / DISCARD button */
     ui_test_btn_discard = lv_btn_create(action_area);
     lv_obj_add_style(ui_test_btn_discard, &style_btn_danger, 0);
     lv_obj_set_size(ui_test_btn_discard, 200, 56);
@@ -219,6 +261,20 @@ void ui_test_active_create(void)
     lv_obj_set_style_text_font(disc_lbl, &lv_font_montserrat_20, 0);
     lv_obj_center(disc_lbl);
     lv_obj_add_flag(ui_test_btn_discard, LV_OBJ_FLAG_HIDDEN);
+
+    /* RETRY button — shown only for void results in DBTT mode */
+    ui_test_btn_retry = lv_btn_create(action_area);
+    lv_obj_set_size(ui_test_btn_retry, 200, 56);
+    lv_obj_set_style_bg_color(ui_test_btn_retry, UI_COLOR_WARNING, 0);
+    lv_obj_set_style_bg_opa(ui_test_btn_retry, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(ui_test_btn_retry, 8, 0);
+    lv_obj_add_event_cb(ui_test_btn_retry, btn_retry_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *retry_lbl = lv_label_create(ui_test_btn_retry);
+    lv_label_set_text(retry_lbl, LV_SYMBOL_REFRESH " RETRY");
+    lv_obj_set_style_text_font(retry_lbl, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(retry_lbl, UI_COLOR_TEXT, 0);
+    lv_obj_center(retry_lbl);
+    lv_obj_add_flag(ui_test_btn_retry, LV_OBJ_FLAG_HIDDEN);
 
     /* Default view: HOMING (abort only) */
     ui_test_active_set_state(TEST_STATE_HOMING);
@@ -266,8 +322,14 @@ void ui_test_active_set_state(int state)
             msg = "MEASURING - Swing in progress... Hold steady.";
             break;
         case TEST_STATE_COMPLETE:
-            filled = 4; arc_color = UI_COLOR_PRIMARY;
-            msg = "COMPLETE - Test complete. Review results.";
+            filled = 4;
+            if (test_manager_result_is_void()) {
+                arc_color = UI_COLOR_WARNING;
+                msg = "VOID - Specimen not cut. Discard or retry.";
+            } else {
+                arc_color = UI_COLOR_PRIMARY;
+                msg = "COMPLETE - Test complete. Review results.";
+            }
             if (ui_test_detail_label) lv_label_set_text(ui_test_detail_label, "");
             break;
         default:
@@ -290,8 +352,18 @@ void ui_test_active_set_state(int state)
                          state == TEST_STATE_LATCHED     ||
                          state == TEST_STATE_ARMING      ||
                          state == TEST_STATE_ARMED);
-    bool show_done    = (state == TEST_STATE_COMPLETE);
-    bool show_result  = (state == TEST_STATE_COMPLETE);
+    bool is_complete  = (state == TEST_STATE_COMPLETE);
+    bool is_void      = is_complete && test_manager_result_is_void();
+    bool show_done    = is_complete;                /* DONE (normal) or DISCARD (void) */
+    bool show_result  = is_complete;                /* always show measured values */
+    bool show_save_void = is_void;
+    bool show_retry   = is_void;   /* available in both single and DBTT mode */
+
+    /* Update DONE/DISCARD label */
+    if (ui_test_btn_discard) {
+        lv_obj_t *lbl = lv_obj_get_child(ui_test_btn_discard, 0);
+        if (lbl) lv_label_set_text(lbl, is_void ? LV_SYMBOL_TRASH " DISCARD" : LV_SYMBOL_OK " DONE");
+    }
 
     if (show_release) lv_obj_remove_flag(ui_test_btn_release, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(ui_test_btn_release, LV_OBJ_FLAG_HIDDEN);
@@ -301,6 +373,12 @@ void ui_test_active_set_state(int state)
 
     if (show_done) lv_obj_remove_flag(ui_test_btn_discard, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(ui_test_btn_discard, LV_OBJ_FLAG_HIDDEN);
+
+    if (show_save_void) lv_obj_remove_flag(ui_test_btn_save_void, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(ui_test_btn_save_void, LV_OBJ_FLAG_HIDDEN);
+
+    if (show_retry) lv_obj_remove_flag(ui_test_btn_retry, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(ui_test_btn_retry, LV_OBJ_FLAG_HIDDEN);
 
     if (show_result) lv_obj_remove_flag(ui_test_result_panel, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(ui_test_result_panel, LV_OBJ_FLAG_HIDDEN);

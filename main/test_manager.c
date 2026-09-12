@@ -53,11 +53,12 @@
 static test_state_t current_state     = TEST_STATE_IDLE;
 static pendulum_config_t pendulum_cfg;
 static float    brake_target_angle    = 90.0f;
-static uint32_t brake_hold_ms         = 3000;
+static uint32_t brake_hold_ms         = 10000;
 static uint32_t latch_open_ms         = 3000;   /* ms to hold release open during homing */
 static specimen_info_t current_specimen;
 static test_result_t current_result;
 static float live_angle = 0.0f;
+static bool  s_result_is_void = false;  /* true when specimen was not cut (timeout) */
 static test_state_cb_t state_change_cb = NULL;
 static TaskHandle_t sampling_task_handle = NULL;
 static volatile bool sampling_active = false;
@@ -68,17 +69,44 @@ static TaskHandle_t      s_homing_task  = NULL;
 static TaskHandle_t      s_arm_mon_task = NULL;
 static char s_detail_text[96]           = "";     /* live sub-step description for UI */
 
+/* Brake task resources */
+static TaskHandle_t      s_brake_task   = NULL;
+static volatile bool     s_brake_abort  = false;
+
 /* Forward declarations — defined later in this file */
 static void set_state(test_state_t new_state);
 static void angle_sampling_task(void *arg);
 
-/* Retract the brake servo to home (90°) after holding at brake position */
+/* Pump brake 3×, hold, then retract to home.
+ * Checks s_brake_abort every slice so homing_task can reclaim the servo quickly. */
 static void brake_retract_task(void *arg)
 {
     (void)arg;
-    vTaskDelay(pdMS_TO_TICKS(brake_hold_ms));
-    servo_jog_to_angle(90.0f, 2000);
-    TM_INFO("Brake servo retracting to home");
+
+    for (int i = 0; i < 3; i++) {
+        if (s_brake_abort) goto done;
+        servo_jog_to_angle(90.0f, 300);
+        vTaskDelay(pdMS_TO_TICKS(350));
+        if (s_brake_abort) goto done;
+        servo_jog_to_angle(brake_target_angle, 300);
+        vTaskDelay(pdMS_TO_TICKS(350));
+        TM_INFO("Brake pump %d/3", i + 1);
+    }
+
+    /* Hold in 200 ms slices so abort is responsive */
+    for (uint32_t elapsed = 0; elapsed < brake_hold_ms && !s_brake_abort; elapsed += 200) {
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+
+done:
+    if (s_brake_abort) {
+        TM_INFO("Brake task aborted — retracting servo immediately");
+        servo_set_angle(90.0f);
+    } else {
+        servo_jog_to_angle(90.0f, 2000);
+        TM_INFO("Brake servo retracting to home");
+    }
+    s_brake_task = NULL;
     vTaskDelete(NULL);
 }
 
@@ -163,6 +191,18 @@ static void arming_angle_monitor_task(void *arg)
 static void homing_task(void *arg)
 {
     (void)arg;
+
+    /* Wait for any brake task still running from the previous test */
+    if (s_brake_task != NULL) {
+        s_brake_abort = true;
+        TM_INFO("[HOMING] Waiting for brake task to exit...");
+        while (s_brake_task != NULL) {
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
+        s_brake_abort = false;
+        TM_INFO("[HOMING] Brake task exited, starting homing sequence");
+    }
+
     TM_INFO("[HOMING] Sequence started");
 
     /* ── Step 1: Reverse to bottom endstop ──────────────────────────────── */
@@ -280,6 +320,7 @@ static void angle_sampling_task(void *arg)
     float min_angle    = 0.0f;
     bool  first_read   = true;
     bool  swing_active = false;   /* true once pendulum has passed SWING_THRESHOLD */
+    bool  brake_fired  = false;   /* true once brake has been commanded on turnaround */
     uint32_t last_log_ms = 0;
     uint32_t task_start_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
 
@@ -310,7 +351,6 @@ static void angle_sampling_task(void *arg)
                 sampling_active = false;
                 release_set(false);
 
-                /* Record with whatever minimum we observed; mark in notes */
                 current_result.final_angle_deg = min_angle;
                 current_result.energy_joules = charpy_calc_energy(
                     pendulum_cfg.mass_kg,
@@ -329,11 +369,11 @@ static void angle_sampling_task(void *arg)
                         sizeof(current_result.specimen.notes)
                         - strlen(current_result.specimen.notes) - 1);
 
-                data_logger_write_result(&current_result);
-                if (dbtt_manager_is_active()) dbtt_manager_record_result(&current_result);
+                /* Mark void — do NOT save to SD or record in DBTT */
+                s_result_is_void = true;
 
                 servo_set_angle(brake_target_angle);
-                xTaskCreate(brake_retract_task, "brake_ret", 4096, NULL, 3, NULL);
+                xTaskCreate(brake_retract_task, "brake_ret", 4096, NULL, 3, &s_brake_task);
                 audio_manager_play(SOUND_COMPLETE);
                 set_state(TEST_STATE_COMPLETE);
                 break;
@@ -365,6 +405,15 @@ static void angle_sampling_task(void *arg)
                     min_angle = angle;
                 }
 
+                /* Engage brake the moment the pendulum starts returning */
+                if (!brake_fired && angle > min_angle) {
+                    brake_fired = true;
+                    servo_set_angle(brake_target_angle);
+                    TM_INFO("Brake engaged at turnaround (angle=%.2f°, min=%.2f°)",
+                            angle, min_angle);
+                    xTaskCreate(brake_retract_task, "brake_ret", 4096, NULL, 3, &s_brake_task);
+                }
+
                 /* Recovery: angle has risen RECOVERY_THRESHOLD above the minimum */
                 if (angle - min_angle >= RECOVERY_THRESHOLD_DEG) {
                     TM_INFO("Peak minimum: %.2f° (current: %.2f°) — recording result",
@@ -391,6 +440,7 @@ static void angle_sampling_task(void *arg)
 
                     /* Auto-save */
                     current_result.specimen = current_specimen;
+                    s_result_is_void = false;
                     esp_err_t save_err = data_logger_write_result(&current_result);
                     if (save_err != ESP_OK) {
                         TM_ERROR("Auto-save failed: %s", esp_err_to_name(save_err));
@@ -405,9 +455,6 @@ static void angle_sampling_task(void *arg)
                         TM_INFO("DBTT result recorded");
                     }
 
-                    servo_set_angle(brake_target_angle);
-                    TM_INFO("Brake engaged at %.1f°", brake_target_angle);
-                    xTaskCreate(brake_retract_task, "brake_ret", 4096, NULL, 3, NULL);
                     audio_manager_play(SOUND_COMPLETE);
                     set_state(TEST_STATE_COMPLETE);
                 }
@@ -713,6 +760,13 @@ esp_err_t test_manager_save_result(void)
         return err;
     }
 
+    /* Void results were not recorded in DBTT during measurement — do it now */
+    if (s_result_is_void && dbtt_manager_is_active()) {
+        dbtt_manager_record_result(&current_result);
+        TM_INFO("DBTT void-result recorded");
+    }
+    s_result_is_void = false;
+
     TM_INFO("Result saved: %.1f° / %.2f J", current_result.final_angle_deg, current_result.energy_joules);
     set_state(TEST_STATE_IDLE);
     return ESP_OK;
@@ -725,8 +779,27 @@ esp_err_t test_manager_discard_result(void)
     }
 
     TM_INFO("Result discarded");
+    s_result_is_void = false;
     set_state(TEST_STATE_IDLE);
     return ESP_OK;
+}
+
+bool test_manager_result_is_void(void)
+{
+    return s_result_is_void;
+}
+
+esp_err_t test_manager_retry(void)
+{
+    if (current_state != TEST_STATE_COMPLETE || !s_result_is_void) {
+        TM_ERROR("retry() only valid from COMPLETE with a void result");
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_result_is_void = false;
+    /* Re-use stored specimen — force state to SPECIMEN_ENTRY so arm() accepts it */
+    current_state = TEST_STATE_SPECIMEN_ENTRY;
+    TM_INFO("Retrying test for specimen %s", current_specimen.specimen_id);
+    return test_manager_arm(NULL);
 }
 
 float test_manager_get_live_angle(void)
