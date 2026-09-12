@@ -182,11 +182,11 @@ The AS5600 exposes 7 pins. **Only 5 connections are required** for I²C operatio
 ## Test Workflow
 
 1. **Dashboard** — Shows live angle gauge and last test result
-2. **New Test** — Enter specimen ID, operator, material, dimensions
+2. **New Test** — Enter specimen ID, operator, material, dimensions, and notch depth
 3. **Arming** — Motor lifts pendulum to release position, endstop triggers when arm reaches top
 4. **Armed** — Operator presses "RELEASE" on touchscreen
 5. **Measuring** — High-speed angle sampling (~1kHz) until pendulum settles (±0.5° for 500ms)
-6. **Complete** — Displays final angle and absorbed energy. Save or discard result.
+6. **Complete** — Displays final angle, absorbed energy, and impact strength. Save or discard result.
 
 ## Energy Calculation
 
@@ -201,15 +201,32 @@ Where:
 
 Configuration is stored in NVS and editable via Settings screen.
 
+## Impact Strength Calculation
+
+$$A = \frac{w \cdot (h-d)}{100}$$
+
+$$K = \frac{E}{A}$$
+
+Where:
+- $w$ = specimen width (mm)
+- $h$ = specimen height in the notch direction (mm)
+- $d$ = notch depth (mm)
+- $A$ = remaining ligament area (cm²)
+- $K$ = Charpy impact strength (J/cm²)
+
+Width, height, and notch depth are entered for each normal test or once per DBTT session. Geometry with a non-positive remaining ligament is rejected before the machine begins homing.
+
 ## Data Logging
 
 Test results are logged as CSV to the SD card in daily files:
 
 ```
-/sdcard/CHARPY_20260420.csv
+/sdcard/CHARPY_20260420_V2.csv
 ```
 
-CSV columns: `timestamp, specimen_id, material, width_mm, height_mm, length_mm, operator, release_angle, final_angle, energy_joules, notes`
+CSV columns: `timestamp, specimen_id, material, width_mm, height_mm, length_mm, temperature_c, operator, release_angle, final_angle, energy_joules, notes, notch_depth_mm, impact_strength_j_cm2`
+
+Legacy `CHARPY_YYYYMMDD.csv` files remain readable. Their energy results are preserved, but impact strength is shown as unavailable because those records do not contain notch depth.
 
 ## Audio Notifications
 

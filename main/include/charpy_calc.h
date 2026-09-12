@@ -2,6 +2,7 @@
 #define _CHARPY_CALC_H_
 
 #include <math.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 /**
@@ -22,6 +23,7 @@ typedef struct {
     float width_mm;         /* Specimen width in mm */
     float height_mm;        /* Specimen height in mm */
     float length_mm;        /* Specimen length in mm */
+    float notch_depth_mm;   /* Notch depth through specimen height in mm */
     float temperature_c;    /* Test temperature in °C */
     char operator_name[32]; /* e.g. "J. Reyes" */
     char notes[64];         /* Optional notes */
@@ -35,6 +37,8 @@ typedef struct {
     float release_angle_deg;    /* Angle at release (alpha) */
     float final_angle_deg;      /* Angle after impact (beta) */
     float energy_joules;        /* Calculated absorbed energy */
+    float impact_strength_j_cm2;/* Energy divided by net ligament area */
+    bool impact_strength_valid; /* False for invalid geometry or legacy records */
     char timestamp[24];         /* "YYYY-MM-DD HH:MM:SS" */
 } test_result_t;
 
@@ -58,6 +62,59 @@ static inline float charpy_calc_energy(float mass_kg, float arm_length_m,
     float alpha_rad = release_angle_deg * (float)M_PI / 180.0f;
     float beta_rad  = final_angle_deg * (float)M_PI / 180.0f;
     return mass_kg * GRAVITY_M_S2 * arm_length_m * (cosf(beta_rad) - cosf(alpha_rad));
+}
+
+/**
+ * @brief Calculate the remaining ligament area at the notch in cm²
+ *
+ * A = width_mm * (height_mm - notch_depth_mm) / 100
+ *
+ * @return true when the geometry is valid and area_cm2 was written
+ */
+static inline bool charpy_calc_net_area_cm2(float width_mm, float height_mm,
+                                            float notch_depth_mm, float *area_cm2)
+{
+    if (area_cm2 == NULL) return false;
+    *area_cm2 = 0.0f;
+
+    if (!isfinite(width_mm) || !isfinite(height_mm) ||
+        !isfinite(notch_depth_mm) || width_mm <= 0.0f || height_mm <= 0.0f ||
+        notch_depth_mm < 0.0f || notch_depth_mm >= height_mm) {
+        return false;
+    }
+
+    float calculated_area_cm2 = width_mm * (height_mm - notch_depth_mm) / 100.0f;
+    if (!isfinite(calculated_area_cm2) || calculated_area_cm2 <= 0.0f) return false;
+
+    *area_cm2 = calculated_area_cm2;
+    return true;
+}
+
+/**
+ * @brief Calculate Charpy impact strength from absorbed energy and geometry
+ *
+ * @return true when energy and geometry are valid and strength_j_cm2 was written
+ */
+static inline bool charpy_calc_impact_strength(float energy_joules,
+                                               float width_mm,
+                                               float height_mm,
+                                               float notch_depth_mm,
+                                               float *strength_j_cm2)
+{
+    float area_cm2;
+    if (strength_j_cm2 == NULL) return false;
+    *strength_j_cm2 = 0.0f;
+
+    if (!isfinite(energy_joules) || energy_joules < 0.0f ||
+        !charpy_calc_net_area_cm2(width_mm, height_mm, notch_depth_mm, &area_cm2)) {
+        return false;
+    }
+
+    float calculated_strength = energy_joules / area_cm2;
+    if (!isfinite(calculated_strength)) return false;
+
+    *strength_j_cm2 = calculated_strength;
+    return true;
 }
 
 /**

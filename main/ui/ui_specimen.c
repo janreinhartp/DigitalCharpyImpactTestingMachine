@@ -10,9 +10,11 @@ lv_obj_t *ui_spec_material_dd = NULL;
 lv_obj_t *ui_spec_width_ta    = NULL;
 lv_obj_t *ui_spec_height_ta   = NULL;
 lv_obj_t *ui_spec_length_ta   = NULL;
+lv_obj_t *ui_spec_notch_ta    = NULL;
 lv_obj_t *ui_spec_temp_ta     = NULL;
 lv_obj_t *ui_spec_notes_ta    = NULL;
 lv_obj_t *ui_spec_keyboard    = NULL;
+static lv_obj_t *s_geometry_error_label = NULL;
 
 extern void ui_create_screen_status_bar(lv_obj_t *screen);
 
@@ -36,6 +38,7 @@ static void btn_arm_start_cb(lv_event_t *e)
     spec.width_mm  = (float)atof(lv_textarea_get_text(ui_spec_width_ta));
     spec.height_mm = (float)atof(lv_textarea_get_text(ui_spec_height_ta));
     spec.length_mm = (float)atof(lv_textarea_get_text(ui_spec_length_ta));
+    spec.notch_depth_mm = (float)atof(lv_textarea_get_text(ui_spec_notch_ta));
     spec.temperature_c = (float)atof(lv_textarea_get_text(ui_spec_temp_ta));
 
     strncpy(spec.notes, lv_textarea_get_text(ui_spec_notes_ta), sizeof(spec.notes) - 1);
@@ -44,8 +47,14 @@ static void btn_arm_start_cb(lv_event_t *e)
     if (test_manager_get_state() == TEST_STATE_IDLE) {
         test_manager_start_new();
     }
-    test_manager_arm(&spec);
-    ui_show_test_active();
+    esp_err_t err = test_manager_arm(&spec);
+    if (err == ESP_OK) {
+        lv_label_set_text(s_geometry_error_label, "");
+        ui_show_test_active();
+    } else {
+        lv_label_set_text(s_geometry_error_label,
+                          "Enter positive width/height and a notch depth smaller than height.");
+    }
 }
 
 static void ta_focus_cb(lv_event_t *e)
@@ -196,7 +205,7 @@ void ui_specimen_create(void)
     lv_obj_clear_flag(dim_cont, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *dim_lbl = lv_label_create(dim_cont);
-    lv_label_set_text(dim_lbl, "Dimensions WxHxL (mm)");
+    lv_label_set_text(dim_lbl, "Dimensions W x H x L / Notch depth (mm)");
     lv_obj_set_style_text_font(dim_lbl, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(dim_lbl, UI_COLOR_TEXT_SEC, 0);
 
@@ -211,7 +220,7 @@ void ui_specimen_create(void)
     lv_obj_clear_flag(dim_row, LV_OBJ_FLAG_SCROLLABLE);
 
     ui_spec_width_ta = lv_textarea_create(dim_row);
-    lv_obj_set_size(ui_spec_width_ta, 120, 44);
+    lv_obj_set_size(ui_spec_width_ta, 92, 44);
     lv_textarea_set_one_line(ui_spec_width_ta, true);
     lv_textarea_set_text(ui_spec_width_ta, "10");
     lv_textarea_set_accepted_chars(ui_spec_width_ta, "0123456789.");
@@ -224,7 +233,7 @@ void ui_specimen_create(void)
     lv_obj_set_style_text_font(sep1, &lv_font_montserrat_20, 0);
 
     ui_spec_height_ta = lv_textarea_create(dim_row);
-    lv_obj_set_size(ui_spec_height_ta, 120, 44);
+    lv_obj_set_size(ui_spec_height_ta, 92, 44);
     lv_textarea_set_one_line(ui_spec_height_ta, true);
     lv_textarea_set_text(ui_spec_height_ta, "10");
     lv_textarea_set_accepted_chars(ui_spec_height_ta, "0123456789.");
@@ -237,12 +246,25 @@ void ui_specimen_create(void)
     lv_obj_set_style_text_font(sep2, &lv_font_montserrat_20, 0);
 
     ui_spec_length_ta = lv_textarea_create(dim_row);
-    lv_obj_set_size(ui_spec_length_ta, 120, 44);
+    lv_obj_set_size(ui_spec_length_ta, 92, 44);
     lv_textarea_set_one_line(ui_spec_length_ta, true);
     lv_textarea_set_text(ui_spec_length_ta, "55");
     lv_textarea_set_accepted_chars(ui_spec_length_ta, "0123456789.");
     lv_obj_add_style(ui_spec_length_ta, &style_input, 0);
     lv_obj_add_event_cb(ui_spec_length_ta, ta_focus_cb, LV_EVENT_FOCUSED, NULL);
+
+    lv_obj_t *sep3 = lv_label_create(dim_row);
+    lv_label_set_text(sep3, "/");
+    lv_obj_set_style_text_color(sep3, UI_COLOR_TEXT_SEC, 0);
+    lv_obj_set_style_text_font(sep3, &lv_font_montserrat_20, 0);
+
+    ui_spec_notch_ta = lv_textarea_create(dim_row);
+    lv_obj_set_size(ui_spec_notch_ta, 92, 44);
+    lv_textarea_set_one_line(ui_spec_notch_ta, true);
+    lv_textarea_set_text(ui_spec_notch_ta, "2");
+    lv_textarea_set_accepted_chars(ui_spec_notch_ta, "0123456789.");
+    lv_obj_add_style(ui_spec_notch_ta, &style_input, 0);
+    lv_obj_add_event_cb(ui_spec_notch_ta, ta_focus_cb, LV_EVENT_FOCUSED, NULL);
 
     /* Form row 3: Temperature + Notes */
     lv_obj_t *row3 = lv_obj_create(content);
@@ -256,6 +278,11 @@ void ui_specimen_create(void)
 
     ui_spec_temp_ta = create_labeled_ta(row3, "Temperature (\u00b0C)", "e.g. 23", 220, 44, true);
     ui_spec_notes_ta = create_labeled_ta(row3, "Notes (optional)", "", 720, 44, false);
+
+    s_geometry_error_label = lv_label_create(content);
+    lv_label_set_text(s_geometry_error_label, "");
+    lv_obj_set_style_text_color(s_geometry_error_label, UI_COLOR_DANGER, 0);
+    lv_obj_set_style_text_font(s_geometry_error_label, &lv_font_montserrat_14, 0);
 
     /* ARM & START button */
     lv_obj_t *btn_arm = lv_btn_create(content);

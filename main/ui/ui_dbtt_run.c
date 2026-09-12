@@ -55,6 +55,7 @@ static void btn_arm_cb(lv_event_t *e)
     spec.width_mm      = sess->width_mm;
     spec.height_mm     = sess->height_mm;
     spec.length_mm     = sess->length_mm;
+    spec.notch_depth_mm = sess->notch_depth_mm;
     spec.temperature_c = (float)atof(lv_textarea_get_text(s_temp_ta));
 
     if (test_manager_get_state() == TEST_STATE_IDLE) {

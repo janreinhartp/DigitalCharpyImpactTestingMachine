@@ -77,6 +77,20 @@ static volatile bool     s_brake_abort  = false;
 static void set_state(test_state_t new_state);
 static void angle_sampling_task(void *arg);
 
+static void calculate_impact_strength(void)
+{
+    current_result.impact_strength_valid = charpy_calc_impact_strength(
+                                     current_result.energy_joules,
+                                     current_specimen.width_mm,
+                                     current_specimen.height_mm,
+                                     current_specimen.notch_depth_mm,
+                                     &current_result.impact_strength_j_cm2);
+    if (!current_result.impact_strength_valid) {
+        current_result.impact_strength_j_cm2 = 0.0f;
+        TM_ERROR("Cannot calculate impact strength: invalid energy or specimen geometry");
+    }
+}
+
 /* Pump brake 3×, hold, then retract to home.
  * Checks s_brake_abort every slice so homing_task can reclaim the servo quickly. */
 static void brake_retract_task(void *arg)
@@ -357,6 +371,7 @@ static void angle_sampling_task(void *arg)
                     pendulum_cfg.arm_length_m,
                     current_result.release_angle_deg,
                     min_angle);
+                calculate_impact_strength();
 
                 rtc_datetime_t dt_to;
                 if (rtc_get_datetime(&dt_to) == ESP_OK) {
@@ -430,6 +445,7 @@ static void angle_sampling_task(void *arg)
                         pendulum_cfg.arm_length_m,
                         current_result.release_angle_deg,
                         min_angle);
+                    calculate_impact_strength();
 
                     /* Timestamp */
                     rtc_datetime_t dt;
@@ -609,6 +625,18 @@ esp_err_t test_manager_arm(const specimen_info_t *specimen)
     if (current_state != TEST_STATE_SPECIMEN_ENTRY) {
         TM_ERROR("Cannot arm from state %s", test_manager_state_name(current_state));
         return ESP_ERR_INVALID_STATE;
+    }
+
+    const specimen_info_t *specimen_to_use = specimen != NULL ? specimen : &current_specimen;
+    float net_area_cm2;
+    if (!charpy_calc_net_area_cm2(specimen_to_use->width_mm,
+                                  specimen_to_use->height_mm,
+                                  specimen_to_use->notch_depth_mm,
+                                  &net_area_cm2)) {
+        TM_ERROR("Invalid specimen geometry: width=%.2f height=%.2f notch=%.2f mm",
+                 specimen_to_use->width_mm, specimen_to_use->height_mm,
+                 specimen_to_use->notch_depth_mm);
+        return ESP_ERR_INVALID_ARG;
     }
 
     if (specimen != NULL) {

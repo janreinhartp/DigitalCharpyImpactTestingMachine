@@ -250,15 +250,19 @@ static void on_test_state_change(test_state_t old_state, test_state_t new_state)
     if (new_state == TEST_STATE_COMPLETE) {
         const test_result_t *result = test_manager_get_result();
         if (result) {
-            char angle_buf[16], energy_buf[16];
+            char angle_buf[16], energy_buf[16], strength_buf[24];
             snprintf(angle_buf, sizeof(angle_buf), "%.0f°", result->final_angle_deg);
             snprintf(energy_buf, sizeof(energy_buf), "%.2f J", result->energy_joules);
+            snprintf(strength_buf, sizeof(strength_buf), "%.2f J/cm\xc2\xb2",
+                     result->impact_strength_j_cm2);
             lv_label_set_text(ui_test_result_angle_label, angle_buf);
             lv_label_set_text(ui_test_result_energy_label, energy_buf);
+            lv_label_set_text(ui_test_result_strength_label, strength_buf);
 
             /* Also update dashboard last result */
             lv_label_set_text(ui_dash_last_angle_label, angle_buf);
             lv_label_set_text(ui_dash_last_energy_label, energy_buf);
+            lv_label_set_text(ui_dash_last_strength_label, strength_buf);
             lv_label_set_text(ui_dash_last_specimen_label, result->specimen.specimen_id);
             lv_label_set_text(ui_dash_last_material_label, result->specimen.material);
             lv_label_set_text(ui_dash_last_operator_label, result->specimen.operator_name);

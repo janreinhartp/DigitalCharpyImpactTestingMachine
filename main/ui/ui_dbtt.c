@@ -22,7 +22,9 @@ static lv_obj_t *s_n_ta         = NULL;
 static lv_obj_t *s_width_ta     = NULL;
 static lv_obj_t *s_height_ta    = NULL;
 static lv_obj_t *s_length_ta    = NULL;
+static lv_obj_t *s_notch_ta     = NULL;
 static lv_obj_t *s_kb           = NULL;
+static lv_obj_t *s_geometry_error_label = NULL;
 
 extern void ui_create_screen_status_bar(lv_obj_t *screen);
 
@@ -56,8 +58,17 @@ static void btn_start_cb(lv_event_t *e)
     float w = (float)atof(lv_textarea_get_text(s_width_ta));
     float h = (float)atof(lv_textarea_get_text(s_height_ta));
     float l = (float)atof(lv_textarea_get_text(s_length_ta));
+    float notch = (float)atof(lv_textarea_get_text(s_notch_ta));
 
-    dbtt_manager_start(mat_buf, op, n, w, h, l);
+    float net_area_cm2;
+    if (!charpy_calc_net_area_cm2(w, h, notch, &net_area_cm2)) {
+        lv_label_set_text(s_geometry_error_label,
+                          "Enter positive width/height and a notch depth smaller than height.");
+        return;
+    }
+
+    lv_label_set_text(s_geometry_error_label, "");
+    dbtt_manager_start(mat_buf, op, n, w, h, l, notch);
     ui_show_dbtt_run();
 }
 
@@ -201,10 +212,16 @@ void ui_dbtt_setup_create(void)
     lv_obj_set_style_pad_column(row2, 20, 0);
     lv_obj_clear_flag(row2, LV_OBJ_FLAG_SCROLLABLE);
 
-    s_n_ta      = make_field(row2, "Number of Tests (1-20)", "5",  190, "5",  true);
-    s_width_ta  = make_field(row2, "Width (mm)",  "10", 190, "10", true);
-    s_height_ta = make_field(row2, "Height (mm)", "10", 190, "10", true);
-    s_length_ta = make_field(row2, "Length (mm)", "55", 190, "55", true);
+    s_n_ta      = make_field(row2, "Tests (1-20)", "5",  160, "5",  true);
+    s_width_ta  = make_field(row2, "Width (mm)",  "10", 160, "10", true);
+    s_height_ta = make_field(row2, "Height (mm)", "10", 160, "10", true);
+    s_length_ta = make_field(row2, "Length (mm)", "55", 160, "55", true);
+    s_notch_ta  = make_field(row2, "Notch (mm)",  "2",  160, "2",  true);
+
+    s_geometry_error_label = lv_label_create(content);
+    lv_label_set_text(s_geometry_error_label, "");
+    lv_obj_set_style_text_color(s_geometry_error_label, UI_COLOR_DANGER, 0);
+    lv_obj_set_style_text_font(s_geometry_error_label, &lv_font_montserrat_14, 0);
 
     /* ——— Description ——— */
     lv_obj_t *desc = lv_label_create(content);

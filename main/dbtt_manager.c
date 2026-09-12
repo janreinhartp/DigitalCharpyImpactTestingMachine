@@ -11,11 +11,30 @@ static const char *TAG = "dbtt_mgr";
 static dbtt_session_t s_session;
 static bool           s_active = false;
 
+typedef struct {
+    float temperature_c;
+    float energy_joules;
+    float final_angle_deg;
+    char specimen_id[24];
+} legacy_dbtt_point_t;
+
+typedef struct {
+    char material[32];
+    char operator_name[32];
+    float width_mm;
+    float height_mm;
+    float length_mm;
+    int n_planned;
+    int n_done;
+    legacy_dbtt_point_t points[DBTT_SESSION_MAX_TESTS];
+} legacy_dbtt_session_t;
+
 /* ——————————————— Public API ——————————————— */
 
 void dbtt_manager_start(const char *material, const char *operator_name,
                         int n_planned,
-                        float width_mm, float height_mm, float length_mm)
+                        float width_mm, float height_mm, float length_mm,
+                        float notch_depth_mm)
 {
     memset(&s_session, 0, sizeof(s_session));
     strncpy(s_session.material,      material,      sizeof(s_session.material) - 1);
@@ -26,6 +45,7 @@ void dbtt_manager_start(const char *material, const char *operator_name,
     s_session.width_mm  = width_mm;
     s_session.height_mm = height_mm;
     s_session.length_mm = length_mm;
+    s_session.notch_depth_mm = notch_depth_mm;
     s_active = true;
     ESP_LOGI(TAG, "Session started: %s, N=%d", material, s_session.n_planned);
 }
@@ -49,6 +69,8 @@ void dbtt_manager_record_result(const test_result_t *result)
     dbtt_point_t *p    = &s_session.points[s_session.n_done];
     p->temperature_c   = result->specimen.temperature_c;
     p->energy_joules   = result->energy_joules;
+    p->impact_strength_j_cm2 = result->impact_strength_j_cm2;
+    p->impact_strength_valid = result->impact_strength_valid;
     p->final_angle_deg = result->final_angle_deg;
     strncpy(p->specimen_id, result->specimen.specimen_id, sizeof(p->specimen_id) - 1);
     s_session.n_done++;
@@ -83,17 +105,20 @@ esp_err_t dbtt_manager_save_csv(void)
     }
 
     /* Session header block */
-    fprintf(f, "\n### DBTT Session | Material: %s | Operator: %s | N=%d\n",
-            s_session.material, s_session.operator_name, s_session.n_done);
-    fprintf(f, "Test#,Temperature_C,Final_Angle_deg,Energy_J,Specimen_ID\n");
+        fprintf(f, "\n### DBTT Session | Material: %s | Operator: %s | N=%d | Geometry_mm: %.1fx%.1fx%.1f | Notch_mm: %.2f\n",
+            s_session.material, s_session.operator_name, s_session.n_done,
+            (double)s_session.width_mm, (double)s_session.height_mm,
+            (double)s_session.length_mm, (double)s_session.notch_depth_mm);
+        fprintf(f, "Test#,Temperature_C,Final_Angle_deg,Energy_J,Impact_Strength_J_cm2,Specimen_ID\n");
 
     for (int i = 0; i < s_session.n_done; i++) {
         const dbtt_point_t *p = &s_session.points[i];
-        fprintf(f, "%d,%.1f,%.1f,%.2f,%s\n",
+        fprintf(f, "%d,%.1f,%.1f,%.2f,%.2f,%s\n",
                 i + 1,
                 (double)p->temperature_c,
                 (double)p->final_angle_deg,
                 (double)p->energy_joules,
+            (double)p->impact_strength_j_cm2,
                 p->specimen_id);
     }
 
@@ -186,7 +211,46 @@ esp_err_t dbtt_manager_load_session(const char *filename, dbtt_session_t *out)
         ESP_LOGE(TAG, "Cannot open %s", path);
         return ESP_FAIL;
     }
-    size_t n = fread(out, sizeof(dbtt_session_t), 1, f);
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return ESP_FAIL;
+    }
+    long file_size = ftell(f);
+    rewind(f);
+
+    if (file_size == (long)sizeof(dbtt_session_t)) {
+        size_t n = fread(out, sizeof(dbtt_session_t), 1, f);
+        fclose(f);
+        return (n == 1) ? ESP_OK : ESP_FAIL;
+    }
+
+    if (file_size == (long)sizeof(legacy_dbtt_session_t)) {
+        legacy_dbtt_session_t legacy;
+        size_t n = fread(&legacy, sizeof(legacy), 1, f);
+        fclose(f);
+        if (n != 1) return ESP_FAIL;
+
+        memset(out, 0, sizeof(*out));
+        memcpy(out->material, legacy.material, sizeof(out->material));
+        memcpy(out->operator_name, legacy.operator_name, sizeof(out->operator_name));
+        out->width_mm = legacy.width_mm;
+        out->height_mm = legacy.height_mm;
+        out->length_mm = legacy.length_mm;
+        out->n_planned = legacy.n_planned;
+        out->n_done = legacy.n_done;
+        if (out->n_done < 0 || out->n_done > DBTT_SESSION_MAX_TESTS) return ESP_FAIL;
+        for (int i = 0; i < out->n_done; i++) {
+            out->points[i].temperature_c = legacy.points[i].temperature_c;
+            out->points[i].energy_joules = legacy.points[i].energy_joules;
+            out->points[i].final_angle_deg = legacy.points[i].final_angle_deg;
+            memcpy(out->points[i].specimen_id, legacy.points[i].specimen_id,
+                   sizeof(out->points[i].specimen_id));
+        }
+        ESP_LOGI(TAG, "Loaded legacy DBTT session without notch/strength data");
+        return ESP_OK;
+    }
+
     fclose(f);
-    return (n == 1) ? ESP_OK : ESP_FAIL;
+    ESP_LOGE(TAG, "Unsupported DBTT session size: %ld", file_size);
+    return ESP_FAIL;
 }

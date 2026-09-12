@@ -3,13 +3,14 @@
 #include "bsp_rtc.h"
 #include "esp_log.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define DL_TAG "DATA_LOG"
 #define DL_INFO(fmt, ...) ESP_LOGI(DL_TAG, fmt, ##__VA_ARGS__)
 #define DL_ERROR(fmt, ...) ESP_LOGE(DL_TAG, fmt, ##__VA_ARGS__)
 
-#define CSV_HEADER "timestamp,specimen_id,material,width_mm,height_mm,length_mm,temperature_c,operator,release_angle,final_angle,energy_joules,notes"
+#define CSV_HEADER "timestamp,specimen_id,material,width_mm,height_mm,length_mm,temperature_c,operator,release_angle,final_angle,energy_joules,notes,notch_depth_mm,impact_strength_j_cm2"
 
 static test_result_t history_cache[HISTORY_CACHE_SIZE];
 static int history_count = 0;
@@ -26,18 +27,21 @@ esp_err_t data_logger_init(void)
 }
 
 /**
- * @brief Build the daily CSV filepath: /sdcard/CHARPY_YYYYMMDD.csv
+ * @brief Build the legacy or current daily CSV filepath
  */
-static void build_filepath(char *buf, size_t buf_size)
+static void build_filepath(char *buf, size_t buf_size, bool versioned)
 {
     rtc_datetime_t dt;
     if (rtc_get_datetime(&dt) == ESP_OK) {
         char date_str[12];
         rtc_format_date_compact(&dt, date_str, sizeof(date_str));
-        snprintf(buf, buf_size, "/sdcard/CHARPY_%s.csv", date_str);
+        snprintf(buf, buf_size, versioned ? "/sdcard/CHARPY_%s_V2.csv"
+                          : "/sdcard/CHARPY_%s.csv",
+             date_str);
     } else {
         /* Fallback if RTC fails */
-        snprintf(buf, buf_size, "/sdcard/CHARPY_UNKNOWN.csv");
+        snprintf(buf, buf_size, versioned ? "/sdcard/CHARPY_UNKNOWN_V2.csv"
+                          : "/sdcard/CHARPY_UNKNOWN.csv");
     }
 }
 
@@ -64,7 +68,7 @@ esp_err_t data_logger_write_result(const test_result_t *result)
     }
 
     char filepath[64];
-    build_filepath(filepath, sizeof(filepath));
+    build_filepath(filepath, sizeof(filepath), true);
 
     /* Ensure file exists with header */
     esp_err_t err = sdcard_ensure_file_with_header(filepath, CSV_HEADER);
@@ -72,9 +76,9 @@ esp_err_t data_logger_write_result(const test_result_t *result)
         return err;
 
     /* Format CSV line */
-    char line[256];
+    char line[320];
     snprintf(line, sizeof(line),
-             "%s,%s,%s,%.1f,%.1f,%.1f,%.1f,%s,%.1f,%.1f,%.2f,%s",
+             "%s,%s,%s,%.1f,%.1f,%.1f,%.1f,%s,%.1f,%.1f,%.2f,%s,%.2f,%.2f",
              result->timestamp,
              result->specimen.specimen_id,
              result->specimen.material,
@@ -86,7 +90,9 @@ esp_err_t data_logger_write_result(const test_result_t *result)
              result->release_angle_deg,
              result->final_angle_deg,
              result->energy_joules,
-             result->specimen.notes);
+             result->specimen.notes,
+             result->specimen.notch_depth_mm,
+             result->impact_strength_j_cm2);
 
     err = sdcard_append_line(filepath, line);
     if (err != ESP_OK) {
@@ -125,28 +131,50 @@ static void parse_csv_line(const char *line, void *user_data)
         history_count = HISTORY_CACHE_SIZE - 1;
     }
 
+    char copy[512];
+    snprintf(copy, sizeof(copy), "%s", line);
+
+    char *fields[14] = {0};
+    int field_count = 1;
+    fields[0] = copy;
+    for (char *cursor = copy; *cursor != '\0' && field_count < 14; cursor++) {
+        if (*cursor == ',') {
+            *cursor = '\0';
+            fields[field_count++] = cursor + 1;
+        }
+    }
+    if (field_count < 11) return;
+
     test_result_t *r = &history_cache[history_count];
     memset(r, 0, sizeof(test_result_t));
 
-    /* Parse CSV: timestamp,specimen_id,material,width,height,length,temperature,operator,release,final,energy,notes */
-    int parsed = sscanf(line,
-        "%23[^,],%31[^,],%31[^,],%f,%f,%f,%f,%31[^,],%f,%f,%f,%63[^\n]",
-        r->timestamp,
-        r->specimen.specimen_id,
-        r->specimen.material,
-        &r->specimen.width_mm,
-        &r->specimen.height_mm,
-        &r->specimen.length_mm,
-        &r->specimen.temperature_c,
-        r->specimen.operator_name,
-        &r->release_angle_deg,
-        &r->final_angle_deg,
-        &r->energy_joules,
-        r->specimen.notes);
-
-    if (parsed >= 11) {
-        history_count++;
+    snprintf(r->timestamp, sizeof(r->timestamp), "%s", fields[0]);
+    snprintf(r->specimen.specimen_id, sizeof(r->specimen.specimen_id), "%s", fields[1]);
+    snprintf(r->specimen.material, sizeof(r->specimen.material), "%s", fields[2]);
+    r->specimen.width_mm = strtof(fields[3], NULL);
+    r->specimen.height_mm = strtof(fields[4], NULL);
+    r->specimen.length_mm = strtof(fields[5], NULL);
+    r->specimen.temperature_c = strtof(fields[6], NULL);
+    snprintf(r->specimen.operator_name, sizeof(r->specimen.operator_name), "%s", fields[7]);
+    r->release_angle_deg = strtof(fields[8], NULL);
+    r->final_angle_deg = strtof(fields[9], NULL);
+    r->energy_joules = strtof(fields[10], NULL);
+    if (field_count >= 12) {
+        snprintf(r->specimen.notes, sizeof(r->specimen.notes), "%s", fields[11]);
     }
+    if (field_count >= 14) {
+        r->specimen.notch_depth_mm = strtof(fields[12], NULL);
+        r->impact_strength_j_cm2 = strtof(fields[13], NULL);
+        float area_cm2;
+        r->impact_strength_valid =
+            charpy_calc_net_area_cm2(r->specimen.width_mm,
+                                     r->specimen.height_mm,
+                                     r->specimen.notch_depth_mm,
+                                     &area_cm2) &&
+            isfinite(r->impact_strength_j_cm2) &&
+            r->impact_strength_j_cm2 >= 0.0f;
+    }
+    history_count++;
 }
 
 esp_err_t data_logger_load_history(void)
@@ -156,17 +184,19 @@ esp_err_t data_logger_load_history(void)
 
     history_count = 0;
 
-    /* Load only today's file — one file per day */
+    /* Load today's legacy file first, then the versioned file. */
     char filepath[64];
-    build_filepath(filepath, sizeof(filepath));
-
-    if (!sdcard_file_exists(filepath)) {
-        DL_INFO("No history file for today (%s)", filepath);
-        return ESP_OK;
+    build_filepath(filepath, sizeof(filepath), false);
+    if (sdcard_file_exists(filepath)) {
+        DL_INFO("Loading legacy history from %s", filepath);
+        sdcard_read_lines(filepath, parse_csv_line, NULL);
     }
 
-    DL_INFO("Loading today's history from %s", filepath);
-    sdcard_read_lines(filepath, parse_csv_line, NULL);
+    build_filepath(filepath, sizeof(filepath), true);
+    if (sdcard_file_exists(filepath)) {
+        DL_INFO("Loading current history from %s", filepath);
+        sdcard_read_lines(filepath, parse_csv_line, NULL);
+    }
     DL_INFO("Loaded %d result(s) from today's file", history_count);
     return ESP_OK;
 }

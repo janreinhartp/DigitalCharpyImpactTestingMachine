@@ -20,6 +20,8 @@ extern "C" {
 typedef struct {
     float temperature_c;    /**< Specimen temperature (°C) */
     float energy_joules;    /**< Absorbed impact energy (J) */
+    float impact_strength_j_cm2; /**< Charpy impact strength (J/cm²) */
+    bool impact_strength_valid;  /**< False when a legacy record has no strength */
     float final_angle_deg;  /**< Post-impact pendulum angle (°) */
     char  specimen_id[24];  /**< Auto-generated ID, e.g. "DBTT-3" */
 } dbtt_point_t;
@@ -33,6 +35,7 @@ typedef struct {
     float width_mm;         /**< Specimen width (mm) — shared for all tests */
     float height_mm;        /**< Specimen height (mm) */
     float length_mm;        /**< Specimen length (mm) */
+    float notch_depth_mm;   /**< Notch depth through specimen height (mm) */
     int   n_planned;        /**< Total number of tests planned */
     int   n_done;           /**< Number of tests completed so far */
     dbtt_point_t points[DBTT_SESSION_MAX_TESTS]; /**< Results array */
@@ -47,10 +50,12 @@ typedef struct {
  * @param width_mm      Specimen width in mm
  * @param height_mm     Specimen height in mm
  * @param length_mm     Specimen length in mm
+ * @param notch_depth_mm Notch depth through specimen height in mm
  */
 void dbtt_manager_start(const char *material, const char *operator_name,
                         int n_planned,
-                        float width_mm, float height_mm, float length_mm);
+                        float width_mm, float height_mm, float length_mm,
+                        float notch_depth_mm);
 
 /**
  * @brief Abort / reset the current session. Safe to call at any time.

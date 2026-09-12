@@ -3,7 +3,7 @@
  *
  * Displays the completed (or partial) DBTT session as:
  *   • Scatter chart: X = Temperature (°C), Y = Absorbed Energy (J)
- *   • Data table:    Test# | Temp (°C) | Energy (J) | Angle (°) | Specimen ID
+ *   • Data table:    Test# | Temp | Energy | Impact strength | Angle | Specimen ID
  *
  * Buttons: Save CSV → SD card  |  New Session → setup  |  Back → Dashboard
  */
@@ -265,18 +265,20 @@ static void refresh_with_session(const dbtt_session_t *sess)
     lv_chart_refresh(s_chart);
 
     /* ——— Data table ——— */
-    lv_table_set_col_cnt(s_table, 5);
-    lv_table_set_col_width(s_table, 0,  50);  /* # */
-    lv_table_set_col_width(s_table, 1, 130);  /* Temp */
-    lv_table_set_col_width(s_table, 2, 130);  /* Energy */
-    lv_table_set_col_width(s_table, 3, 120);  /* Angle */
-    lv_table_set_col_width(s_table, 4, 200);  /* Specimen */
+    lv_table_set_col_cnt(s_table, 6);
+    lv_table_set_col_width(s_table, 0,  40);  /* # */
+    lv_table_set_col_width(s_table, 1,  90);  /* Temp */
+    lv_table_set_col_width(s_table, 2,  90);  /* Energy */
+    lv_table_set_col_width(s_table, 3, 125);  /* Strength */
+    lv_table_set_col_width(s_table, 4,  85);  /* Angle */
+    lv_table_set_col_width(s_table, 5, 170);  /* Specimen */
 
     lv_table_set_cell_value(s_table, 0, 0, "#");
     lv_table_set_cell_value(s_table, 0, 1, "Temp (\xc2\xb0""C)");
     lv_table_set_cell_value(s_table, 0, 2, "Energy (J)");
-    lv_table_set_cell_value(s_table, 0, 3, "Angle (\xc2\xb0)");
-    lv_table_set_cell_value(s_table, 0, 4, "Specimen");
+    lv_table_set_cell_value(s_table, 0, 3, "Strength (J/cm\xc2\xb2)");
+    lv_table_set_cell_value(s_table, 0, 4, "Angle (\xc2\xb0)");
+    lv_table_set_cell_value(s_table, 0, 5, "Specimen");
 
     lv_table_set_row_cnt(s_table, (uint32_t)(n + 1));
 
@@ -293,10 +295,17 @@ static void refresh_with_session(const dbtt_session_t *sess)
         snprintf(buf, sizeof(buf), "%.2f", (double)p->energy_joules);
         lv_table_set_cell_value(s_table, (uint32_t)(i + 1), 2, buf);
 
-        snprintf(buf, sizeof(buf), "%.1f", (double)p->final_angle_deg);
+        if (p->impact_strength_valid) {
+            snprintf(buf, sizeof(buf), "%.2f", (double)p->impact_strength_j_cm2);
+        } else {
+            snprintf(buf, sizeof(buf), "--");
+        }
         lv_table_set_cell_value(s_table, (uint32_t)(i + 1), 3, buf);
 
-        lv_table_set_cell_value(s_table, (uint32_t)(i + 1), 4, p->specimen_id);
+        snprintf(buf, sizeof(buf), "%.1f", (double)p->final_angle_deg);
+        lv_table_set_cell_value(s_table, (uint32_t)(i + 1), 4, buf);
+
+        lv_table_set_cell_value(s_table, (uint32_t)(i + 1), 5, p->specimen_id);
     }
 }
 

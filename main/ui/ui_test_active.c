@@ -10,6 +10,7 @@ lv_obj_t *ui_test_detail_label = NULL;
 lv_obj_t *ui_test_progress_dots[4] = {NULL};
 lv_obj_t *ui_test_result_angle_label = NULL;
 lv_obj_t *ui_test_result_energy_label = NULL;
+lv_obj_t *ui_test_result_strength_label = NULL;
 lv_obj_t *ui_test_btn_release = NULL;
 lv_obj_t *ui_test_btn_abort = NULL;
 lv_obj_t *ui_test_btn_save = NULL;
@@ -197,6 +198,21 @@ void ui_test_active_create(void)
     lv_obj_set_style_text_font(ui_test_result_energy_label, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(ui_test_result_energy_label, UI_COLOR_SUCCESS, 0);
     lv_obj_center(ui_test_result_energy_label);
+
+    /* Impact strength result card */
+    lv_obj_t *r_strength = lv_obj_create(ui_test_result_panel);
+    lv_obj_set_size(r_strength, 300, 60);
+    lv_obj_set_style_bg_color(r_strength, UI_COLOR_SURFACE_EL, 0);
+    lv_obj_set_style_bg_opa(r_strength, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(r_strength, 8, 0);
+    lv_obj_set_style_border_width(r_strength, 0, 0);
+    lv_obj_clear_flag(r_strength, LV_OBJ_FLAG_SCROLLABLE);
+
+    ui_test_result_strength_label = lv_label_create(r_strength);
+    lv_label_set_text(ui_test_result_strength_label, "-- J/cm\xc2\xb2");
+    lv_obj_set_style_text_font(ui_test_result_strength_label, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_color(ui_test_result_strength_label, UI_COLOR_WARNING, 0);
+    lv_obj_center(ui_test_result_strength_label);
 
     /* ——— Action area (buttons change per state) ——— */
     action_area = lv_obj_create(content);

@@ -5,6 +5,7 @@ lv_obj_t *ui_dash_arc = NULL;
 lv_obj_t *ui_dash_angle_label = NULL;
 lv_obj_t *ui_dash_last_angle_label = NULL;
 lv_obj_t *ui_dash_last_energy_label = NULL;
+lv_obj_t *ui_dash_last_strength_label = NULL;
 lv_obj_t *ui_dash_last_specimen_label = NULL;
 lv_obj_t *ui_dash_last_material_label = NULL;
 lv_obj_t *ui_dash_last_operator_label = NULL;
@@ -113,7 +114,7 @@ void ui_dashboard_create(void)
 
     /* Angle box */
     lv_obj_t *angle_box = lv_obj_create(result_row);
-    lv_obj_set_size(angle_box, 200, 100);
+    lv_obj_set_size(angle_box, 140, 100);
     lv_obj_set_style_bg_color(angle_box, UI_COLOR_SURFACE_EL, 0);
     lv_obj_set_style_bg_opa(angle_box, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(angle_box, 8, 0);
@@ -122,13 +123,13 @@ void ui_dashboard_create(void)
 
     ui_dash_last_angle_label = lv_label_create(angle_box);
     lv_label_set_text(ui_dash_last_angle_label, "--°");
-    lv_obj_set_style_text_font(ui_dash_last_angle_label, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_text_font(ui_dash_last_angle_label, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(ui_dash_last_angle_label, UI_COLOR_PRIMARY, 0);
     lv_obj_center(ui_dash_last_angle_label);
 
     /* Energy box */
     lv_obj_t *energy_box = lv_obj_create(result_row);
-    lv_obj_set_size(energy_box, 200, 100);
+    lv_obj_set_size(energy_box, 140, 100);
     lv_obj_set_style_bg_color(energy_box, UI_COLOR_SURFACE_EL, 0);
     lv_obj_set_style_bg_opa(energy_box, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(energy_box, 8, 0);
@@ -137,9 +138,24 @@ void ui_dashboard_create(void)
 
     ui_dash_last_energy_label = lv_label_create(energy_box);
     lv_label_set_text(ui_dash_last_energy_label, "-- J");
-    lv_obj_set_style_text_font(ui_dash_last_energy_label, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_text_font(ui_dash_last_energy_label, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(ui_dash_last_energy_label, UI_COLOR_SUCCESS, 0);
     lv_obj_center(ui_dash_last_energy_label);
+
+    /* Impact strength box */
+    lv_obj_t *strength_box = lv_obj_create(result_row);
+    lv_obj_set_size(strength_box, 150, 100);
+    lv_obj_set_style_bg_color(strength_box, UI_COLOR_SURFACE_EL, 0);
+    lv_obj_set_style_bg_opa(strength_box, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(strength_box, 8, 0);
+    lv_obj_set_style_border_width(strength_box, 0, 0);
+    lv_obj_clear_flag(strength_box, LV_OBJ_FLAG_SCROLLABLE);
+
+    ui_dash_last_strength_label = lv_label_create(strength_box);
+    lv_label_set_text(ui_dash_last_strength_label, "-- J/cm\xc2\xb2");
+    lv_obj_set_style_text_font(ui_dash_last_strength_label, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(ui_dash_last_strength_label, UI_COLOR_WARNING, 0);
+    lv_obj_center(ui_dash_last_strength_label);
 
     /* Specimen info labels */
     ui_dash_last_specimen_label = lv_label_create(right_card);

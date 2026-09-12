@@ -38,13 +38,14 @@ static void btn_next_cb(lv_event_t *e)
 static void update_table(void)
 {
     /* Set column count & header row */
-    lv_table_set_col_cnt(ui_hist_table, 6);
-    lv_table_set_col_width(ui_hist_table, 0, 180);   /* Date */
-    lv_table_set_col_width(ui_hist_table, 1, 180);   /* Specimen */
-    lv_table_set_col_width(ui_hist_table, 2, 155);   /* Material */
-    lv_table_set_col_width(ui_hist_table, 3, 120);   /* Angle */
-    lv_table_set_col_width(ui_hist_table, 4, 120);   /* Energy */
-    lv_table_set_col_width(ui_hist_table, 5, 175);   /* Status */
+    lv_table_set_col_cnt(ui_hist_table, 7);
+    lv_table_set_col_width(ui_hist_table, 0, 155);   /* Date */
+    lv_table_set_col_width(ui_hist_table, 1, 140);   /* Specimen */
+    lv_table_set_col_width(ui_hist_table, 2, 130);   /* Material */
+    lv_table_set_col_width(ui_hist_table, 3, 95);    /* Angle */
+    lv_table_set_col_width(ui_hist_table, 4, 100);   /* Energy */
+    lv_table_set_col_width(ui_hist_table, 5, 140);   /* Strength */
+    lv_table_set_col_width(ui_hist_table, 6, 100);   /* Status */
 
     /* Header */
     lv_table_set_cell_value(ui_hist_table, 0, 0, "Date/Time");
@@ -52,7 +53,8 @@ static void update_table(void)
     lv_table_set_cell_value(ui_hist_table, 0, 2, "Material");
     lv_table_set_cell_value(ui_hist_table, 0, 3, "Angle(°)");
     lv_table_set_cell_value(ui_hist_table, 0, 4, "Energy(J)");
-    lv_table_set_cell_value(ui_hist_table, 0, 5, "Status");
+    lv_table_set_cell_value(ui_hist_table, 0, 5, "Strength(J/cm\xc2\xb2)");
+    lv_table_set_cell_value(ui_hist_table, 0, 6, "Status");
 
     const test_result_t *history = NULL;
     total_records = 0;
@@ -73,12 +75,18 @@ static void update_table(void)
         lv_table_set_cell_value(ui_hist_table, i + 1, 1, r->specimen.specimen_id);
         lv_table_set_cell_value(ui_hist_table, i + 1, 2, r->specimen.material);
 
-        char angle_buf[16]; char energy_buf[16];
+        char angle_buf[16]; char energy_buf[16]; char strength_buf[20];
         snprintf(angle_buf, sizeof(angle_buf), "%.1f", r->final_angle_deg);
         snprintf(energy_buf, sizeof(energy_buf), "%.2f", r->energy_joules);
+        if (r->impact_strength_valid) {
+            snprintf(strength_buf, sizeof(strength_buf), "%.2f", r->impact_strength_j_cm2);
+        } else {
+            snprintf(strength_buf, sizeof(strength_buf), "--");
+        }
         lv_table_set_cell_value(ui_hist_table, i + 1, 3, angle_buf);
         lv_table_set_cell_value(ui_hist_table, i + 1, 4, energy_buf);
-        lv_table_set_cell_value(ui_hist_table, i + 1, 5, (r->energy_joules > 0) ? "OK" : "--");
+        lv_table_set_cell_value(ui_hist_table, i + 1, 5, strength_buf);
+        lv_table_set_cell_value(ui_hist_table, i + 1, 6, (r->energy_joules > 0) ? "OK" : "--");
     }
 
     /* Status labels */
