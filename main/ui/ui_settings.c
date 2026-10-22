@@ -124,8 +124,9 @@ static void cal_apply_save_cb(lv_event_t *e)
     if (err == ESP_OK) {
         char buf[80];
         snprintf(buf, sizeof(buf),
-                 LV_SYMBOL_OK " Scale: %.4f | Zero: %u raw",
-                 sf, angle_get_zero_offset());
+             LV_SYMBOL_OK " Scales: +%.4f / %.4f | Zero: %u",
+             angle_get_signed_positive_scale(),
+             angle_get_signed_negative_scale(), angle_get_zero_offset());
         lv_label_set_text(ui_set_zero_label, buf);
         lv_obj_set_style_text_color(ui_set_zero_label, UI_COLOR_SUCCESS, 0);
         test_manager_save_config();   /* persist to NVS */
@@ -494,10 +495,11 @@ static void create_tab_calibration(lv_obj_t *parent)
 
     /* Result label (reuses ui_set_zero_label so it's accessible globally) */
     ui_set_zero_label = lv_label_create(parent);
-    char init_buf[48];
+    char init_buf[72];
     snprintf(init_buf, sizeof(init_buf),
-             "Current scale: %.4f  |  Zero: %u raw",
-             angle_get_scale(), angle_get_zero_offset());
+             "Current scales: +%.4f / %.4f  |  Zero: %u",
+             angle_get_signed_positive_scale(),
+             angle_get_signed_negative_scale(), angle_get_zero_offset());
     lv_label_set_text(ui_set_zero_label, init_buf);
     lv_obj_set_style_text_color(ui_set_zero_label, UI_COLOR_TEXT_SEC, 0);
     lv_obj_set_style_text_font(ui_set_zero_label, &lv_font_montserrat_16, 0);

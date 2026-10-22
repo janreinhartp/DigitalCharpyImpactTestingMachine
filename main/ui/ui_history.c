@@ -50,7 +50,7 @@ static void update_table(void)
     lv_table_set_cell_value(ui_hist_table, 0, 0, "Date/Time");
     lv_table_set_cell_value(ui_hist_table, 0, 1, "Specimen");
     lv_table_set_cell_value(ui_hist_table, 0, 2, "Material");
-    lv_table_set_cell_value(ui_hist_table, 0, 3, "Angle(°)");
+    lv_table_set_cell_value(ui_hist_table, 0, 3, "Rel / Final (°)");
     lv_table_set_cell_value(ui_hist_table, 0, 4, "Energy(J)");
     lv_table_set_cell_value(ui_hist_table, 0, 5, "Status");
 
@@ -73,8 +73,9 @@ static void update_table(void)
         lv_table_set_cell_value(ui_hist_table, i + 1, 1, r->specimen.specimen_id);
         lv_table_set_cell_value(ui_hist_table, i + 1, 2, r->specimen.material);
 
-        char angle_buf[16]; char energy_buf[16];
-        snprintf(angle_buf, sizeof(angle_buf), "%.1f", r->final_angle_deg);
+        char angle_buf[32]; char energy_buf[16];
+        snprintf(angle_buf, sizeof(angle_buf), "%.1f / %.1f",
+                 r->release_angle_deg, r->final_angle_deg);
         snprintf(energy_buf, sizeof(energy_buf), "%.2f", r->energy_joules);
         lv_table_set_cell_value(ui_hist_table, i + 1, 3, angle_buf);
         lv_table_set_cell_value(ui_hist_table, i + 1, 4, energy_buf);

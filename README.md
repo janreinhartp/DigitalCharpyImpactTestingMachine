@@ -209,7 +209,9 @@ Test results are logged as CSV to the SD card in daily files:
 /sdcard/CHARPY_20260420.csv
 ```
 
-CSV columns: `timestamp, specimen_id, material, width_mm, height_mm, length_mm, operator, release_angle, final_angle, energy_joules, notes`
+CSV columns: `timestamp, specimen_id, material, width_mm, height_mm, length_mm, temperature_c, operator, release_angle_deg, final_angle_deg, mass_kg, arm_length_m, energy_joules, notes`
+
+Angles are saved to 0.1° precision, mass and arm length to 0.001 kg/m, and energy to 0.01 J. If the current day's CSV already has the older column layout, new-schema records are written to a same-day `_V2.csv` file; history loads both files.
 
 ## Audio Notifications
 

@@ -11,6 +11,7 @@
 #include "audio_manager.h"
 #include "data_logger.h"
 #include "esp_lvgl_port.h"
+#include "esp_system.h"
 #include <math.h>
 
 /* LDO channel handles */
@@ -278,15 +279,22 @@ static void ui_update_task(void *pvParameters)
     char time_buf[16], date_buf[16];
     rtc_datetime_t dt;
     uint32_t log_tick = 0;
+    uint32_t rtc_tick = 30;
+
+    snprintf(time_buf, sizeof(time_buf), "--:--:--");
+    snprintf(date_buf, sizeof(date_buf), "-- --- ----");
 
     while (1) {
-        /* Read RTC time (outside lock — no LVGL dependency) */
-        if (rtc_get_datetime(&dt) == ESP_OK) {
-            rtc_format_time(&dt, time_buf, sizeof(time_buf));
-            rtc_format_date(&dt, date_buf, sizeof(date_buf));
-        } else {
-            snprintf(time_buf, sizeof(time_buf), "--:--:--");
-            snprintf(date_buf, sizeof(date_buf), "-- --- ----");
+        /* The RTC changes once per second; avoid flooding the shared touch I2C bus. */
+        if (++rtc_tick >= 30) {
+            rtc_tick = 0;
+            if (rtc_get_datetime(&dt) == ESP_OK) {
+                rtc_format_time(&dt, time_buf, sizeof(time_buf));
+                rtc_format_date(&dt, date_buf, sizeof(date_buf));
+            } else {
+                snprintf(time_buf, sizeof(time_buf), "--:--:--");
+                snprintf(date_buf, sizeof(date_buf), "-- --- ----");
+            }
         }
 
         /* Determine state color (outside lock — no LVGL dependency) */
@@ -298,10 +306,16 @@ static void ui_update_task(void *pvParameters)
             dot_color = UI_COLOR_DANGER;
         }
 
-        /* Read live angle (EMA-filtered) */
+        /* The measurement task owns the ADC during a swing. Reuse its latest
+         * sample here so UI refreshes cannot delay peak capture. */
         float angle = 0.0f;
-        uint16_t raw_angle = 0;
-        esp_err_t angle_err = angle_read_degrees(&angle);
+        uint16_t raw_angle = angle_get_last_raw();
+        esp_err_t angle_err = ESP_OK;
+        if (state == TEST_STATE_ARMING || state == TEST_STATE_MEASURING) {
+            angle = test_manager_get_live_angle();
+        } else {
+            angle_err = angle_read_degrees(&angle);
+        }
         char angle_buf[16];
         snprintf(angle_buf, sizeof(angle_buf), "%.0f°", angle);
         int arc_val = (int)fabsf(angle);
@@ -310,7 +324,6 @@ static void ui_update_task(void *pvParameters)
         /* Log angle ~once per second — read raw only when needed */
         if (++log_tick >= 30) {
             log_tick = 0;
-            angle_read_raw(&raw_angle);
             if (angle_err != ESP_OK) {
                 MAIN_ERROR("Potentiometer read failed: %s", esp_err_to_name(angle_err));
             } else {
@@ -353,7 +366,8 @@ static void ui_update_task(void *pvParameters)
 
 void app_main(void)
 {
-    MAIN_INFO("Starting Digital Charpy Impact Testing Machine...");
+    MAIN_INFO("Starting Digital Charpy Impact Testing Machine (reset reason=%d)...",
+              (int)esp_reset_reason());
 
     /* System initialization (LDO, LCD, touch, I2C, peripherals) */
     system_init();

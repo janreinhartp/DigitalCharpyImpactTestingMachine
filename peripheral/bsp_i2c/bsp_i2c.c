@@ -6,6 +6,8 @@
 
 i2c_master_bus_handle_t i2c_bus_handle = NULL;
 
+#define I2C_TRANSACTION_TIMEOUT_MS 100
+
 /*————————————————————————————————————————Variable declaration end———————————————————————————————————————*/
 
 /*—————————————————————————————————————————Functional function———————————————————————————————————————————*/
@@ -45,12 +47,12 @@ i2c_master_dev_handle_t i2c_dev_register(uint16_t dev_device_address)
 
 esp_err_t i2c_read(i2c_master_dev_handle_t i2c_dev, uint8_t *read_buffer, size_t read_size)
 {
-    return i2c_master_receive(i2c_dev, read_buffer, read_size, 1000); /*Perform a read transaction on the I2C bus*/
+    return i2c_master_receive(i2c_dev, read_buffer, read_size, I2C_TRANSACTION_TIMEOUT_MS); /*Perform a read transaction on the I2C bus*/
 }
 
 esp_err_t i2c_write(i2c_master_dev_handle_t i2c_dev, uint8_t *write_buffer, size_t write_size)
 {
-    return i2c_master_transmit(i2c_dev, write_buffer, write_size, 1000); /*Perform a write transaction on the I2C bus*/
+    return i2c_master_transmit(i2c_dev, write_buffer, write_size, I2C_TRANSACTION_TIMEOUT_MS); /*Perform a write transaction on the I2C bus*/
 }
 
 esp_err_t i2c_write_read(i2c_master_dev_handle_t i2c_dev, uint8_t read_reg, uint8_t *read_buffer, size_t read_size, uint16_t delayms)
@@ -67,13 +69,13 @@ esp_err_t i2c_write_read(i2c_master_dev_handle_t i2c_dev, uint8_t read_reg, uint
 
 esp_err_t i2c_read_reg(i2c_master_dev_handle_t i2c_dev, uint8_t reg_addr, uint8_t *read_buffer, size_t read_size)
 {
-    return i2c_master_transmit_receive(i2c_dev, &reg_addr, 1, read_buffer, read_size, 1000); /*Perform a write-read transaction on the I2C bus*/
+    return i2c_master_transmit_receive(i2c_dev, &reg_addr, 1, read_buffer, read_size, I2C_TRANSACTION_TIMEOUT_MS); /*Perform a write-read transaction on the I2C bus*/
 }
 
 esp_err_t i2c_write_reg(i2c_master_dev_handle_t i2c_dev, uint8_t reg_addr, uint8_t data)
 {
     uint8_t write_buf[2] = {reg_addr, data};                                 /*Register address and data*/
-    return i2c_master_transmit(i2c_dev, write_buf, sizeof(write_buf), 1000); /*Perform a write transaction on the I2C bus*/
+    return i2c_master_transmit(i2c_dev, write_buf, sizeof(write_buf), I2C_TRANSACTION_TIMEOUT_MS); /*Perform a write transaction on the I2C bus*/
 }
 
 /*———————————————————————————————————————Functional function end—————————————————————————————————————————*/

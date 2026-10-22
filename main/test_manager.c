@@ -23,13 +23,14 @@
 /* Angle stability detection thresholds */
 #define SETTLE_TOLERANCE_DEG   2.0f    /* retained for reference, no longer used in sampling */
 #define SETTLE_DURATION_MS    1000     /* retained for reference, no longer used in sampling */
-#define SAMPLING_PERIOD_MS      20     /* 50 Hz — ADC does 16 reads/call (~5 ms work)        */
+#define SAMPLING_PERIOD_MS      10     /* 100 Hz: minimum period at CONFIG_FREERTOS_HZ=100    */
 #define SWING_THRESHOLD_DEG   30.0f   /* Pendulum must move this far from release angle      *
-                                       * before minimum tracking is enabled                  */
-#define RECOVERY_THRESHOLD_DEG 5.0f   /* Once angle rises this far above the minimum the     *
-                                       * swing peak is considered found — record and break   */
+                                       * and cross home before peak tracking is enabled      */
+#define RECOVERY_THRESHOLD_DEG 5.0f   /* Required return travel after the opposite-side peak  */
+#define RECOVERY_CONFIRM_SAMPLES 3    /* Reject isolated ADC spikes before completing         */
 #define MEASURE_TIMEOUT_MS    30000   /* If no recovery detected within this time the         *
                                        * specimen is considered unbroken — record and stop   */
+#define FINAL_ANGLE_OFFSET_DEG 40.0f  /* Temporary correction pending encoder replacement      */
 
 /* Actuator pulse duration */
 #define ACTUATOR_PULSE_MS      200
@@ -46,6 +47,8 @@
 #define NVS_KEY_REL_ANG    "rel_ang"
 #define NVS_KEY_ZERO_OFF   "zero_off"
 #define NVS_KEY_SCALE      "scale"
+#define NVS_KEY_SCALE_POS  "scale_pos"
+#define NVS_KEY_SCALE_NEG  "scale_neg"
 #define NVS_KEY_BRAKE_ANG  "brake_ang"
 #define NVS_KEY_BRAKE_HOLD "brake_hld"
 #define NVS_KEY_LATCH_MS   "latch_ms"
@@ -76,6 +79,24 @@ static volatile bool     s_brake_abort  = false;
 /* Forward declarations — defined later in this file */
 static void set_state(test_state_t new_state);
 static void angle_sampling_task(void *arg);
+
+static float corrected_final_angle(float peak_angle)
+{
+    return fminf(fabsf(peak_angle) + FINAL_ANGLE_OFFSET_DEG, 180.0f);
+}
+
+static void calculate_result_energy(void)
+{
+    current_result.release_angle_deg = roundf(current_result.release_angle_deg * 10.0f) / 10.0f;
+    current_result.final_angle_deg = roundf(current_result.final_angle_deg * 10.0f) / 10.0f;
+    current_result.mass_kg = pendulum_cfg.mass_kg;
+    current_result.arm_length_m = pendulum_cfg.arm_length_m;
+    current_result.energy_joules = roundf(charpy_calc_energy(
+        current_result.mass_kg,
+        current_result.arm_length_m,
+        current_result.release_angle_deg,
+        current_result.final_angle_deg) * 100.0f) / 100.0f;
+}
 
 /* Pump brake 3×, hold, then retract to home.
  * Checks s_brake_abort every slice so homing_task can reclaim the servo quickly. */
@@ -307,36 +328,36 @@ static void set_state(test_state_t new_state)
 /* High-priority angle sampling task
  * Algorithm:
  *   1. Record baseline angle at the moment of release (first sample).
- *   2. Wait for the pendulum to swing SWING_THRESHOLD_DEG away from baseline.
- *   3. Track the running minimum angle (lowest / most-negative value).
- *   4. Once the angle rises RECOVERY_THRESHOLD_DEG above that minimum the
- *      swing peak has been passed — record min_angle as the impact result
- *      and stop.  This gives the correct Charpy β angle for energy calc.
+ *   2. Wait for it to move SWING_THRESHOLD_DEG and cross the 0° home position.
+ *   3. Track the furthest angle on the opposite side.
+ *   4. Require several samples returning from that peak before recording it.
  */
 static void angle_sampling_task(void *arg)
 {
     (void)arg;
     float start_angle  = 0.0f;
-    float min_angle    = 0.0f;
+     float peak_angle   = 0.0f;
+     float swing_direction = -1.0f;
     bool  first_read   = true;
-    bool  swing_active = false;   /* true once pendulum has passed SWING_THRESHOLD */
-    bool  brake_fired  = false;   /* true once brake has been commanded on turnaround */
+     bool  swing_active = false;
+     uint32_t recovery_samples = 0;
     uint32_t last_log_ms = 0;
     uint32_t task_start_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+    TickType_t last_wake_tick = xTaskGetTickCount();
 
     TM_INFO("Angle sampling started — swing gate %.1f°, recovery %.1f°, timeout %d s",
             SWING_THRESHOLD_DEG, RECOVERY_THRESHOLD_DEG, MEASURE_TIMEOUT_MS / 1000);
 
     while (sampling_active) {
         float angle;
-        if (angle_read_degrees(&angle) == ESP_OK) {
+        if (angle_read_degrees_instant(&angle) == ESP_OK) {
             live_angle = angle;
 
             /* Log at ~10 Hz */
             uint32_t now_log_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
             if ((now_log_ms - last_log_ms) >= 100) {
                 if (swing_active) {
-                    TM_INFO("Angle: %.2f°  (min so far: %.2f°)", angle, min_angle);
+                    TM_INFO("Angle: %.2f°  (peak so far: %.2f°)", angle, peak_angle);
                 } else {
                     TM_INFO("Angle: %.2f° [waiting for swing]", angle);
                 }
@@ -346,17 +367,13 @@ static void angle_sampling_task(void *arg)
             /* ── Timeout: specimen not broken ──────────────────────────────────── */
             uint32_t elapsed_ms = (xTaskGetTickCount() * portTICK_PERIOD_MS) - task_start_ms;
             if (elapsed_ms >= MEASURE_TIMEOUT_MS) {
-                TM_ERROR("Measurement timeout (%d s) — specimen likely NOT BROKEN (min=%.1f°)",
-                         MEASURE_TIMEOUT_MS / 1000, min_angle);
+                TM_ERROR("Measurement timeout (%d s) — specimen likely NOT BROKEN (peak=%.1f°)",
+                         MEASURE_TIMEOUT_MS / 1000, peak_angle);
                 sampling_active = false;
                 release_set(false);
 
-                current_result.final_angle_deg = min_angle;
-                current_result.energy_joules = charpy_calc_energy(
-                    pendulum_cfg.mass_kg,
-                    pendulum_cfg.arm_length_m,
-                    current_result.release_angle_deg,
-                    min_angle);
+                current_result.final_angle_deg = corrected_final_angle(peak_angle);
+                calculate_result_energy();
 
                 rtc_datetime_t dt_to;
                 if (rtc_get_datetime(&dt_to) == ESP_OK) {
@@ -381,7 +398,8 @@ static void angle_sampling_task(void *arg)
 
             if (first_read) {
                 start_angle = angle;
-                min_angle   = angle;
+                peak_angle  = angle;
+                swing_direction = (start_angle >= 0.0f) ? -1.0f : 1.0f;
                 first_read  = false;
                 /* Use the angle at the instant of release as α — more accurate
                  * than the arming endstop reading because the heavy pendulum
@@ -391,45 +409,39 @@ static void angle_sampling_task(void *arg)
                         angle, SWING_THRESHOLD_DEG);
 
             } else if (!swing_active) {
-                /* Gate: wait until pendulum has moved far enough */
-                if (fabsf(angle - start_angle) >= SWING_THRESHOLD_DEG) {
+                bool crossed_home = (start_angle >= 0.0f) ? (angle <= 0.0f)
+                                                           : (angle >= 0.0f);
+                if (crossed_home &&
+                    fabsf(angle - start_angle) >= SWING_THRESHOLD_DEG) {
                     swing_active = true;
-                    min_angle    = angle;
-                    TM_INFO("Swing detected at %.1f° (moved %.1f°) — tracking minimum",
+                    peak_angle   = angle;
+                    TM_INFO("Home crossed at %.1f° (moved %.1f°) — tracking opposite peak",
                             angle, fabsf(angle - start_angle));
                 }
 
             } else {
-                /* Track the lowest (most negative) angle reached */
-                if (angle < min_angle) {
-                    min_angle = angle;
+                if ((angle - peak_angle) * swing_direction > 0.0f) {
+                    peak_angle = angle;
+                    recovery_samples = 0;
+                } else if ((angle - peak_angle) * -swing_direction >=
+                           RECOVERY_THRESHOLD_DEG) {
+                    recovery_samples++;
+                } else {
+                    recovery_samples = 0;
                 }
 
-                /* Engage brake the moment the pendulum starts returning */
-                if (!brake_fired && angle > min_angle) {
-                    brake_fired = true;
+                if (recovery_samples >= RECOVERY_CONFIRM_SAMPLES) {
                     servo_set_angle(brake_target_angle);
-                    TM_INFO("Brake engaged at turnaround (angle=%.2f°, min=%.2f°)",
-                            angle, min_angle);
+                    TM_INFO("Turnaround confirmed: peak=%.2f°, current=%.2f°",
+                            peak_angle, angle);
                     xTaskCreate(brake_retract_task, "brake_ret", 4096, NULL, 3, &s_brake_task);
-                }
-
-                /* Recovery: angle has risen RECOVERY_THRESHOLD above the minimum */
-                if (angle - min_angle >= RECOVERY_THRESHOLD_DEG) {
-                    TM_INFO("Peak minimum: %.2f° (current: %.2f°) — recording result",
-                            min_angle, angle);
                     sampling_active = false;
 
                     release_set(false);
                     TM_INFO("[RELEASE] Actuator OFF");
 
-                    /* Use the peak minimum as the post-impact angle β */
-                    current_result.final_angle_deg = min_angle;
-                    current_result.energy_joules = charpy_calc_energy(
-                        pendulum_cfg.mass_kg,
-                        pendulum_cfg.arm_length_m,
-                        current_result.release_angle_deg,
-                        min_angle);
+                    current_result.final_angle_deg = corrected_final_angle(peak_angle);
+                    calculate_result_energy();
 
                     /* Timestamp */
                     rtc_datetime_t dt;
@@ -445,8 +457,9 @@ static void angle_sampling_task(void *arg)
                     if (save_err != ESP_OK) {
                         TM_ERROR("Auto-save failed: %s", esp_err_to_name(save_err));
                     } else {
-                        TM_INFO("Result saved: α=%.1f°  β=%.1f°  E=%.3f J",
-                                current_result.release_angle_deg, min_angle,
+                        TM_INFO("Result saved: α=%.1f°  β=%.1f°  E=%.2f J",
+                                current_result.release_angle_deg,
+                                current_result.final_angle_deg,
                                 current_result.energy_joules);
                     }
 
@@ -460,7 +473,7 @@ static void angle_sampling_task(void *arg)
                 }
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(SAMPLING_PERIOD_MS));
+        vTaskDelayUntil(&last_wake_tick, pdMS_TO_TICKS(SAMPLING_PERIOD_MS));
     }
 
     TM_INFO("Angle sampling stopped");
@@ -494,6 +507,14 @@ static esp_err_t load_config_from_nvs(void)
     /* Load pulley scale factor */
     if (nvs_get_i32(nvs, NVS_KEY_SCALE, &val) == ESP_OK)
         angle_set_scale((float)val / 10000.0f);
+
+    int32_t positive_scale;
+    int32_t negative_scale;
+    if (nvs_get_i32(nvs, NVS_KEY_SCALE_POS, &positive_scale) == ESP_OK &&
+        nvs_get_i32(nvs, NVS_KEY_SCALE_NEG, &negative_scale) == ESP_OK) {
+        angle_set_side_scales((float)positive_scale / 10000.0f,
+                              (float)negative_scale / 10000.0f);
+    }
 
     /* Load brake servo target angle */
     if (nvs_get_i32(nvs, NVS_KEY_BRAKE_ANG, &val) == ESP_OK)
@@ -529,6 +550,10 @@ static esp_err_t save_config_to_nvs(void)
     nvs_set_i32(nvs, NVS_KEY_REL_ANG, (int32_t)(pendulum_cfg.release_angle_deg * 1000.0f));
     nvs_set_u16(nvs, NVS_KEY_ZERO_OFF, angle_get_zero_offset());
     nvs_set_i32(nvs, NVS_KEY_SCALE,    (int32_t)(angle_get_signed_scale() * 10000.0f));
+    nvs_set_i32(nvs, NVS_KEY_SCALE_POS,
+                (int32_t)(angle_get_signed_positive_scale() * 10000.0f));
+    nvs_set_i32(nvs, NVS_KEY_SCALE_NEG,
+                (int32_t)(angle_get_signed_negative_scale() * 10000.0f));
     nvs_set_i32(nvs, NVS_KEY_BRAKE_ANG, (int32_t)(brake_target_angle * 1000.0f));
     nvs_set_u32(nvs, NVS_KEY_BRAKE_HOLD, brake_hold_ms);
     nvs_set_u32(nvs, NVS_KEY_LATCH_MS,  latch_open_ms);

@@ -35,6 +35,9 @@ esp_err_t angle_init(void);
  */
 esp_err_t angle_read_raw(uint16_t *raw_angle);
 
+/** @brief Return the most recent raw ADC average without starting a new read. */
+uint16_t angle_get_last_raw(void);
+
 /**
  * @brief Read angle in degrees (0.0–360.0), with zero offset and pulley
  *        scale factor applied.
@@ -42,6 +45,14 @@ esp_err_t angle_read_raw(uint16_t *raw_angle);
  * @return ESP_OK on success
  */
 esp_err_t angle_read_degrees(float *degrees);
+
+/**
+ * @brief Read the instantaneous angle without the EMA filter.
+ *        The ADC result is averaged over 16 samples for noise rejection.
+ * @param[out] degrees Pointer to store the signed arm angle in degrees
+ * @return ESP_OK on success
+ */
+esp_err_t angle_read_degrees_instant(float *degrees);
 
 /**
  * @brief Set the zero offset (raw 12-bit units; stored in sensor domain)
@@ -71,6 +82,12 @@ esp_err_t angle_calibrate_zero(void);
 void  angle_set_scale(float scale);
 
 /**
+ * @brief Set independently calibrated conversion scales for each arm side.
+ *        Both values are signed relative to the raw sensor direction.
+ */
+void angle_set_side_scales(float positive_scale, float negative_scale);
+
+/**
  * @brief Get the magnitude of the scale factor (always positive)
  */
 float angle_get_scale(void);
@@ -79,6 +96,12 @@ float angle_get_scale(void);
  * @brief Get the signed scale factor (negative if sensor direction is reversed)
  */
 float angle_get_signed_scale(void);
+
+/** @brief Get signed conversion scale for the positive arm side. */
+float angle_get_signed_positive_scale(void);
+
+/** @brief Get signed conversion scale for the negative arm side. */
+float angle_get_signed_negative_scale(void);
 
 /* ── 3-point calibration ─────────────────────────────────────────────── */
 

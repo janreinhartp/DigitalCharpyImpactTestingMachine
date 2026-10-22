@@ -34,6 +34,8 @@ typedef struct {
     specimen_info_t specimen;
     float release_angle_deg;    /* Angle at release (alpha) */
     float final_angle_deg;      /* Angle after impact (beta) */
+    float mass_kg;              /* Pendulum mass used for this test */
+    float arm_length_m;         /* Pendulum arm length used for this test */
     float energy_joules;        /* Calculated absorbed energy */
     char timestamp[24];         /* "YYYY-MM-DD HH:MM:SS" */
 } test_result_t;

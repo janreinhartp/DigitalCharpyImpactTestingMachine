@@ -3,8 +3,10 @@
 
 static adc_oneshot_unit_handle_t s_adc_handle = NULL;
 static uint16_t zero_offset     = 0;
-static float    scale_factor    = 0.5f;   /* pulley 2:1 — sensor rotates 2× per arm degree */
+static float    positive_scale_factor = 0.5f;
+static float    negative_scale_factor = 0.5f;
 static bool     sensor_reversed = false;  /* true when sensor rotates opposite to arm */
+static volatile uint16_t last_raw = 0;
 
 /* EMA filter state — runs in ARM domain (signed degrees, ~-180..+180) */
 static float  ema_angle       = 0.0f;
@@ -41,16 +43,13 @@ esp_err_t angle_init(void)
     return ESP_OK;
 }
 
-esp_err_t angle_read_raw(uint16_t *raw_angle)
+static esp_err_t angle_read_raw_average(uint16_t *raw_angle, int sample_count)
 {
-    if (raw_angle == NULL || s_adc_handle == NULL)
+    if (raw_angle == NULL || s_adc_handle == NULL || sample_count <= 0)
         return ESP_ERR_INVALID_ARG;
 
-    /* Oversample 16× and average to reduce ADC noise.
-     * Single-read noise on a potentiometer is ~±40 counts (~±1.8°);
-     * 16-sample averaging cuts it by √16 → ~±10 counts (~±0.5°). */
     int32_t sum = 0;
-    for (int i = 0; i < 16; i++) {
+    for (int i = 0; i < sample_count; i++) {
         int sample;
         esp_err_t err = adc_oneshot_read(s_adc_handle, POT_ADC_CHANNEL, &sample);
         if (err != ESP_OK)
@@ -58,17 +57,29 @@ esp_err_t angle_read_raw(uint16_t *raw_angle)
         sum += sample;
     }
 
-    *raw_angle = (uint16_t)((sum / 16) & 0x0FFF);
+    *raw_angle = (uint16_t)((sum / sample_count) & 0x0FFF);
+    last_raw = *raw_angle;
     return ESP_OK;
 }
 
-esp_err_t angle_read_degrees(float *degrees)
+esp_err_t angle_read_raw(uint16_t *raw_angle)
+{
+    /* 16 samples reduce stationary/UI noise to approximately 0.5 degrees. */
+    return angle_read_raw_average(raw_angle, 16);
+}
+
+uint16_t angle_get_last_raw(void)
+{
+    return last_raw;
+}
+
+static esp_err_t read_arm_angle(float *degrees, int sample_count)
 {
     if (degrees == NULL)
         return ESP_ERR_INVALID_ARG;
 
     uint16_t raw;
-    esp_err_t err = angle_read_raw(&raw);
+    esp_err_t err = angle_read_raw_average(&raw, sample_count);
     if (err != ESP_OK)
         return err;
 
@@ -79,8 +90,24 @@ esp_err_t angle_read_degrees(float *degrees)
                   ? (int32_t)zero_offset - (int32_t)raw
                   : (int32_t)raw        - (int32_t)zero_offset;
 
-    /* Instant arm angle (signed, degrees) */
-    float arm_instant = (float)adj * (360.0f / 4096.0f) * scale_factor;
+    /* Each side has its own calibrated scale to account for pulley/linkage
+     * asymmetry. The adjusted count sign is the physical arm side. */
+    float scale = (adj >= 0) ? positive_scale_factor : negative_scale_factor;
+    *degrees = (float)adj * (360.0f / 4096.0f) * scale;
+    return ESP_OK;
+}
+
+esp_err_t angle_read_degrees_instant(float *degrees)
+{
+    return read_arm_angle(degrees, 16);
+}
+
+esp_err_t angle_read_degrees(float *degrees)
+{
+    float arm_instant;
+    esp_err_t err = read_arm_angle(&arm_instant, 16);
+    if (err != ESP_OK)
+        return err;
 
     /* EMA low-pass filter (no circular wrap — linear sensor) */
     if (!ema_initialized) {
@@ -125,20 +152,43 @@ esp_err_t angle_calibrate_zero(void)
 void angle_set_scale(float scale)
 {
     sensor_reversed = (scale < 0.0f);
-    scale_factor    = fabsf(scale);
+    positive_scale_factor = fabsf(scale);
+    negative_scale_factor = fabsf(scale);
     ema_initialized = false;
     ANGLE_INFO("Scale factor set to %.4f (%s)",
-               scale_factor, sensor_reversed ? "reversed" : "forward");
+               positive_scale_factor, sensor_reversed ? "reversed" : "forward");
+}
+
+void angle_set_side_scales(float positive_scale, float negative_scale)
+{
+    sensor_reversed = (positive_scale < 0.0f);
+    positive_scale_factor = fabsf(positive_scale);
+    negative_scale_factor = fabsf(negative_scale);
+    ema_initialized = false;
+    ANGLE_INFO("Side scales set: positive=%.4f negative=%.4f (%s)",
+               positive_scale_factor, negative_scale_factor,
+               sensor_reversed ? "reversed" : "forward");
 }
 
 float angle_get_scale(void)
 {
-    return scale_factor;
+    return (positive_scale_factor + negative_scale_factor) * 0.5f;
 }
 
 float angle_get_signed_scale(void)
 {
-    return sensor_reversed ? -scale_factor : scale_factor;
+    float scale = angle_get_scale();
+    return sensor_reversed ? -scale : scale;
+}
+
+float angle_get_signed_positive_scale(void)
+{
+    return sensor_reversed ? -positive_scale_factor : positive_scale_factor;
+}
+
+float angle_get_signed_negative_scale(void)
+{
+    return sensor_reversed ? -negative_scale_factor : negative_scale_factor;
 }
 
 /* ── 3-point calibration ───────────────────────────────────────────────── */
@@ -227,19 +277,21 @@ esp_err_t angle_cal_apply(float *scale_out)
         ANGLE_ERROR("Cal points too close to zero — cannot compute scale");
         return ESP_ERR_INVALID_ARG;
     }
-    sf = (n == 2) ? (sf1 + sf2) * 0.5f : (sf1 + sf2);   /* sum is safe: unused term is 0 */
+    sf = (n == 2) ? (sf1 + sf2) * 0.5f : (sf1 + sf2);   /* legacy average for display */
 
-    if (fabsf(sf) < 0.01f || fabsf(sf) > 100.0f) {
-        ANGLE_ERROR("Computed scale %.4f out of plausible range", sf);
+    if (n != 2 || sf1 * sf2 <= 0.0f ||
+        fabsf(sf1) < 0.01f || fabsf(sf1) > 100.0f ||
+        fabsf(sf2) < 0.01f || fabsf(sf2) > 100.0f) {
+        ANGLE_ERROR("Invalid side scales: positive=%.4f negative=%.4f", sf1, sf2);
         return ESP_ERR_INVALID_ARG;
     }
 
-    /* Commit: set zero offset then scale */
+    /* Commit each side independently so both known positions remain exact. */
     angle_set_zero_offset(s_cal.raw_zero);
-    angle_set_scale(sf);
+    angle_set_side_scales(sf1, sf2);
 
-    ANGLE_INFO("3-pt cal applied: zero_raw=%u  scale=%.4f  (sf1=%.4f sf2=%.4f)",
-               s_cal.raw_zero, sf, sf1, sf2);
+    ANGLE_INFO("3-pt cal applied: zero_raw=%u positive=%.4f negative=%.4f",
+               s_cal.raw_zero, sf1, sf2);
 
     if (scale_out) *scale_out = sf;
     return ESP_OK;
