@@ -10,13 +10,17 @@ Firmware for a digital Charpy impact testing machine built on the **CrowPanel ES
 | AS5600 Magnetic Encoder | I2C (0x36) | 12-bit angle, **5V supply**, HV side of level shifter |
 | BSS138 Level Shifter | I2C | Bidirectional 3.3V ↔ 5V on SDA/SCL; LV side to ESP32, HV side to 5V devices |
 | Tiny RTC (DS1307) | I2C (0x68) | Battery-backed, CR2032 coin cell, **5V supply**, HV side of level shifter |
-| PCF8575 I/O Expander | I2C (0x20) | 16-bit quasi-bidirectional; **5V supply**, HV side of level shifter; INT → GPIO33 |
+| PCF8575 I/O Expander | I2C (0x20) | 16-bit quasi-bidirectional; **5V supply**, HV side of level shifter. P0–P3 are active-low outputs |
 | SD Card | SDMMC 1-line | IO44 CMD, IO43 CLK, IO39 D0, FAT32 |
 | Speaker + Amplifier | I2S1 | 16kHz/16-bit, amp on IO30 (active-low) |
-| Motor Relay | PCF8575 P0 | Lifts pendulum arm (active-low) |
-| Actuator Relay | PCF8575 P1 | Releases pendulum latch (active-low) |
-| Endstop Switch | PCF8575 P2 | Detects arm at top position (active-low input; triggers PCF8575 INT) |
+| Motor forward | PCF8575 P0 | Active-low output |
+| Motor reverse | PCF8575 P1 | Active-low output |
+| Safety lock | PCF8575 P2 | Active-low output |
+| Release latch | PCF8575 P3 | Active-low output |
+| Top endstop | GPIO50 | Arm at the raised position. Active-low, internal pull-up |
+| Bottom endstop | GPIO51 | Arm at home. Active-low, internal pull-up |
 | Metal Servo (14 V) | MCPWM / GPIO27 | 50 Hz PWM signal (3.3 V logic), motor power from dedicated 14 V supply |
+| ESP32-C6 Wi-Fi | SDMMC slot 1, 1-bit | Onboard coprocessor for the CSV hotspot. CLK GPIO18, CMD GPIO19, D0 GPIO14, D1 GPIO15, reset GPIO32 (active-high). Matches CrowPanel Lesson 17 V1.0 factory slave firmware |
 
 ```mermaid
 graph LR
@@ -27,15 +31,17 @@ graph LR
     SERVO("Metal Servo\n14 V supply")
 
     subgraph PCF ["PCF8575 I/O Expander (0x20, 5V)"]
-        P0["P0 · Motor Relay \u00ac"]
-        P1["P1 · Actuator Relay \u00ac"]
-        P2["P2 · Endstop input \u00ac"]
-        PCF_INT["~INT"]
+        P0["P0 · Motor forward \u00ac"]
+        P1["P1 · Motor reverse \u00ac"]
+        P2["P2 · Safety lock \u00ac"]
+        P3["P3 · Release latch \u00ac"]
     end
 
-    MOTOR_RELAY("Motor Relay")
-    ACT_RELAY("Actuator Relay")
-    ENDSTOP("Endstop Switch")
+    MOTOR("Lift motor")
+    LOCK("Safety lock")
+    LATCH("Release latch")
+    END_TOP("Top endstop")
+    END_BOT("Bottom endstop")
 
     subgraph LS ["BSS138 Level Shifter"]
         LV_SDA["LV · SDA\n3.3V side"]
@@ -54,8 +60,9 @@ graph LR
         I2S_BCLK["IO22 · BCLK"]
         I2S_DOUT["IO23 · DOUT"]
         AMP_EN["IO30 · AMP_EN ¬"]
-        IO33["IO33 · PCF INT"]
         IO27["IO27 · MCPWM"]
+        IO50["IO50 · Top endstop"]
+        IO51["IO51 · Bottom endstop"]
     end
 
     I2C_SDA --- LV_SDA
@@ -66,10 +73,12 @@ graph LR
     HV_SCL --- DS1307
     HV_SDA --- PCF
     HV_SCL --- PCF
-    P0 --- MOTOR_RELAY
-    P1 --- ACT_RELAY
-    P2 --- ENDSTOP
-    PCF_INT --- IO33
+    P0 --- MOTOR
+    P1 --- MOTOR
+    P2 --- LOCK
+    P3 --- LATCH
+    END_TOP --- IO50
+    END_BOT --- IO51
     SD --- SD_CMD
     SD --- SD_CLK
     SD --- SD_D0
@@ -80,7 +89,7 @@ graph LR
     SERVO --- IO27
 ```
 
-> **Note:** The PCF8575, AS5600, and Tiny RTC are all **5V** devices on the HV side of the level shifter. IO45/IO46 (3.3V, LV side) is the only I2C connection to the ESP32. GPIO47 and GPIO48 are now free. PCF8575 P3–P15 are reserved for future expansion. `¬` = active-low. The servo runs from a separate 14 V rail; only GND and the 3.3 V PWM signal (IO27, 470 Ω series resistor recommended) connect to the ESP32.
+> **Note:** The PCF8575, AS5600, and Tiny RTC are all **5V** devices on the HV side of the level shifter. IO45/IO46 (3.3V, LV side) is the only I2C connection to the ESP32. PCF8575 P4–P15 are reserved. `¬` = active-low. Endstops are direct ESP32 inputs on GPIO50 and GPIO51. The servo runs from a separate 14 V rail; only GND and the 3.3 V PWM signal (IO27, 470 Ω series resistor recommended) connect to the ESP32. The ESP32-C6 Wi-Fi link is onboard and uses SDMMC slot 1; the TF card stays on slot 0.
 
 ## Wiring
 
@@ -150,12 +159,16 @@ The AS5600 exposes 7 pins. **Only 5 connections are required** for I²C operatio
 │   ├── test_manager.c          # Test state machine
 │   ├── audio_manager.c         # Non-blocking audio playback task
 │   ├── data_logger.c           # CSV logging to SD card
+│   ├── wifi_portal.c           # On-demand SoftAP for CSV download
+│   ├── web_export.c            # HTTP page that lists and sends CSV files
 │   ├── include/
 │   │   ├── main.h              # System includes and log macros
 │   │   ├── charpy_calc.h       # Energy calculation (header-only)
 │   │   ├── test_manager.h      # Test state machine API
 │   │   ├── audio_manager.h     # Audio manager API
-│   │   └── data_logger.h       # Data logger API
+│   │   ├── data_logger.h       # Data logger API
+│   │   ├── wifi_portal.h       # Hotspot SSID, password, and URL
+│   │   └── web_export.h        # CSV download server API
 │   └── ui/
 │       ├── ui.h                # UI master header (colors, styles, externs)
 │       ├── ui.c                # Theme, styles, status bar, navigation
@@ -185,8 +198,8 @@ The AS5600 exposes 7 pins. **Only 5 connections are required** for I²C operatio
 2. **New Test** — Enter specimen ID, operator, material, dimensions
 3. **Arming** — Motor lifts pendulum to release position, endstop triggers when arm reaches top
 4. **Armed** — Operator presses "RELEASE" on touchscreen
-5. **Measuring** — High-speed angle sampling (~1kHz) until pendulum settles (±0.5° for 500ms)
-6. **Complete** — Displays final angle and absorbed energy. Save or discard result.
+5. **Measuring** — Angle sampling at 100 Hz. The rise angle is the measured peak on the far side of the swing.
+6. **Complete** — Displays that angle and the absorbed energy. The result is already written to the SD card. **DONE** returns to the dashboard. A timed-out, unbroken specimen is marked void and is not saved.
 
 ## Energy Calculation
 
@@ -197,7 +210,7 @@ Where:
 - $g$ = 9.80665 m/s²
 - $L$ = arm length (m), default 0.400 m
 - $\alpha$ = release angle (°)
-- $\beta$ = final (post-impact) angle (°)
+- $\beta$ = measured peak angle after impact (°). The saved value is the absolute peak, limited to 180°.
 
 Configuration is stored in NVS and editable via Settings screen.
 
@@ -212,6 +225,18 @@ Test results are logged as CSV to the SD card in daily files:
 CSV columns: `timestamp, specimen_id, material, width_mm, height_mm, length_mm, temperature_c, operator, release_angle_deg, final_angle_deg, mass_kg, arm_length_m, energy_joules, notes`
 
 Angles are saved to 0.1° precision, mass and arm length to 0.001 kg/m, and energy to 0.01 J. If the current day's CSV already has the older column layout, new-schema records are written to a same-day `_V2.csv` file; history loads both files.
+
+### Download without removing the card
+
+Wi-Fi stays off during a test. On **Settings → SD Card**, press **Enable CSV download** only while the machine is idle. That starts a hotspot and pauses jogging, new tests, and SD audio until **Turn Wi-Fi off**.
+
+| | |
+|---|---|
+| Network | `Charpy-Impact` |
+| Password | `charpy-data` |
+| Page | http://192.168.4.1 |
+
+The page lists `CHARPY_*.csv`, `CHARPY_*_V2.csv`, and `DBTT_results.csv`. A failed C6 link leaves impact testing available; the SD Card tab shows that Wi-Fi did not start.
 
 ## Audio Notifications
 
@@ -304,9 +329,9 @@ The main operational screen — state-driven. The arc gauge indicator colour cha
 | ARMING | ABORT TEST |
 | ARMED | RELEASE ARM (large, red) + ABORT TEST |
 | MEASURING | ABORT TEST |
-| COMPLETE | SAVE RESULT (green) + DISCARD (danger outline) |
+| COMPLETE | DONE, or DISCARD when the result is void |
 
-When COMPLETE, a **result panel** appears showing the measured angle (°) and calculated energy (J) before the operator decides to save or discard.
+When COMPLETE, a **result panel** shows the measured angle (°) and calculated energy (J). A normal result is already on the SD card.
 
 ---
 
@@ -336,7 +361,7 @@ Reached via "SETTINGS" on the Dashboard. Uses a **sidebar + content panel** layo
 | **Pendulum** | Hammer mass (kg), arm length (m), release angle (°). Saved to NVS on "Save Config". |
 | **Calibration** | Single-button zero calibration — positions the AS5600 encoder's zero-reference to the current physical position. Displays the resulting offset angle. |
 | **Date & Time** | Reads and displays the current DS1307 RTC date/time. (Setting requires serial or a pre-set RTC module.) |
-| **SD Card** | Mount status; total and free capacity in MB when mounted. |
+| **SD Card** | Mount status and capacity. **Enable CSV download** / **Turn Wi-Fi off** starts the hotspot only while the machine is idle. |
 | **Audio** | Toggle switch to enable/disable sound notifications. |
 | **About** | Firmware version and hardware info. |
 

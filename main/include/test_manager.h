@@ -164,4 +164,15 @@ esp_err_t test_manager_set_latch_open_ms(uint32_t ms);
  */
 const char *test_manager_get_detail_text(void);
 
+/**
+ * @brief While set, new tests and arming are rejected so CSV download
+ *        can use the SD card without a pendulum cycle.
+ */
+void test_manager_set_export_mode(bool enabled);
+
+/**
+ * @brief True while CSV download has the machine paused.
+ */
+bool test_manager_export_mode_active(void);
+
 #endif

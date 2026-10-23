@@ -389,7 +389,7 @@ void app_main(void)
 
     /* Note: endstop callbacks are registered internally by test_manager_init() */
 
-    /* Initialize UI */
+    /* Initialize UI. The CSV hotspot stays off until Settings enables it. */
     ui_init();
     MAIN_INFO("UI initialized successfully");
 

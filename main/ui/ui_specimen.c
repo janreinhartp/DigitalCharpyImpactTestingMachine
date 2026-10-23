@@ -42,9 +42,13 @@ static void btn_arm_start_cb(lv_event_t *e)
 
     /* Start test */
     if (test_manager_get_state() == TEST_STATE_IDLE) {
-        test_manager_start_new();
+        if (test_manager_start_new() != ESP_OK) {
+            return;
+        }
     }
-    test_manager_arm(&spec);
+    if (test_manager_arm(&spec) != ESP_OK) {
+        return;
+    }
     ui_show_test_active();
 }
 

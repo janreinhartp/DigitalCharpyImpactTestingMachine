@@ -73,4 +73,19 @@ bool sdcard_file_exists(const char *filepath);
  */
 esp_err_t sdcard_get_space(uint64_t *total_bytes, uint64_t *free_bytes);
 
+/**
+ * @brief Lock SD card file operations.
+ *
+ * Public sdcard_* helpers take this lock themselves. Hold it only around a
+ * direct fopen/fread/fwrite/fclose when code does not use those helpers.
+ * Download streaming takes the lock per chunk so a test result can append
+ * between chunks. Do not call other sdcard_* functions while holding it.
+ */
+void sdcard_lock(void);
+
+/**
+ * @brief Release the lock taken by sdcard_lock().
+ */
+void sdcard_unlock(void);
+
 #endif

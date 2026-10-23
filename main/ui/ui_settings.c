@@ -6,6 +6,9 @@
 #include "bsp_servo.h"
 #include "bsp_extra.h"
 #include "audio_manager.h"
+#include "wifi_portal.h"
+#include "web_export.h"
+#include "esp_lvgl_port.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
@@ -871,6 +874,112 @@ static void create_tab_datetime(lv_obj_t *parent)
     lv_obj_center(bl);
 }
 
+static lv_obj_t *s_wifi_status = NULL;
+static lv_obj_t *s_wifi_btn = NULL;
+static lv_obj_t *s_wifi_btn_lbl = NULL;
+static bool s_wifi_worker_busy = false;
+static bool s_wifi_failed = false;
+static bool s_sound_was_enabled = true;
+
+static void wifi_ui_apply(void)
+{
+    if (s_wifi_status == NULL || s_wifi_btn == NULL || s_wifi_btn_lbl == NULL) {
+        return;
+    }
+
+    if (s_wifi_worker_busy) {
+        lv_obj_add_state(s_wifi_btn, LV_STATE_DISABLED);
+        if (wifi_portal_is_started()) {
+            lv_label_set_text(s_wifi_status, "Stopping hotspot...");
+        } else {
+            lv_label_set_text(s_wifi_status, "Starting hotspot...");
+        }
+        return;
+    }
+
+    lv_obj_remove_state(s_wifi_btn, LV_STATE_DISABLED);
+    if (wifi_portal_is_started()) {
+        lv_label_set_text(s_wifi_status,
+            "Wi-Fi hotspot: " WIFI_PORTAL_SSID "\n"
+            "Password: " WIFI_PORTAL_PASS "\n"
+            "Join that network, then open " WIFI_PORTAL_URL);
+        lv_label_set_text(s_wifi_btn_lbl, "Turn Wi-Fi off");
+    } else if (s_wifi_failed) {
+        lv_label_set_text(s_wifi_status, "Wi-Fi failed to start");
+        lv_label_set_text(s_wifi_btn_lbl, "Enable CSV download");
+    } else {
+        lv_label_set_text(s_wifi_status, "Wi-Fi not started");
+        lv_label_set_text(s_wifi_btn_lbl, "Enable CSV download");
+    }
+}
+
+static void csv_export_worker(void *arg)
+{
+    bool enable = (bool)(intptr_t)arg;
+
+    if (enable) {
+        test_manager_set_export_mode(true);
+        s_sound_was_enabled = audio_manager_is_enabled();
+        audio_manager_set_enabled(false);
+
+        esp_err_t err = wifi_portal_start();
+        if (err == ESP_OK) {
+            err = web_export_start();
+        }
+        if (err != ESP_OK) {
+            web_export_stop();
+            wifi_portal_stop();
+            audio_manager_set_enabled(s_sound_was_enabled);
+            test_manager_set_export_mode(false);
+            s_wifi_failed = true;
+        } else {
+            s_wifi_failed = false;
+        }
+    } else {
+        web_export_stop();
+        wifi_portal_stop();
+        audio_manager_set_enabled(s_sound_was_enabled);
+        test_manager_set_export_mode(false);
+        s_wifi_failed = false;
+    }
+
+    if (lvgl_port_lock(2000)) {
+        s_wifi_worker_busy = false;
+        wifi_ui_apply();
+        lvgl_port_unlock();
+    } else {
+        s_wifi_worker_busy = false;
+    }
+    vTaskDelete(NULL);
+}
+
+static void btn_csv_wifi_cb(lv_event_t *e)
+{
+    (void)e;
+    if (s_wifi_worker_busy) {
+        return;
+    }
+
+    bool enable = !wifi_portal_is_started();
+    if (enable && test_manager_get_state() != TEST_STATE_IDLE) {
+        lv_label_set_text(s_wifi_status, "Finish or abort the test before enabling Wi-Fi");
+        return;
+    }
+
+    s_wifi_worker_busy = true;
+    s_wifi_failed = false;
+    wifi_ui_apply();
+
+    if (xTaskCreate(csv_export_worker, "csv_wifi", 8192,
+                    (void *)(intptr_t)enable, 3, NULL) != pdPASS) {
+        s_wifi_worker_busy = false;
+        if (enable) {
+            s_wifi_failed = true;
+        }
+        wifi_ui_apply();
+    }
+}
+
 static void create_tab_sdcard(lv_obj_t *parent)
 {
     lv_obj_t *title = lv_label_create(parent);
@@ -894,6 +1003,22 @@ static void create_tab_sdcard(lv_obj_t *parent)
     } else {
         lv_label_set_text(ui_set_sd_label, "Status: Not mounted\nInsert SD card and restart.");
     }
+
+    lv_obj_t *wifi = lv_label_create(parent);
+    s_wifi_status = wifi;
+    lv_obj_set_width(wifi, lv_pct(100));
+    lv_label_set_long_mode(wifi, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_color(wifi, UI_COLOR_TEXT_SEC, 0);
+    lv_obj_set_style_text_font(wifi, &lv_font_montserrat_16, 0);
+
+    s_wifi_btn = lv_btn_create(parent);
+    lv_obj_add_style(s_wifi_btn, &style_btn_primary, 0);
+    lv_obj_set_size(s_wifi_btn, 280, 48);
+    lv_obj_add_event_cb(s_wifi_btn, btn_csv_wifi_cb, LV_EVENT_CLICKED, NULL);
+    s_wifi_btn_lbl = lv_label_create(s_wifi_btn);
+    lv_obj_set_style_text_font(s_wifi_btn_lbl, &lv_font_montserrat_16, 0);
+    lv_obj_center(s_wifi_btn_lbl);
+    wifi_ui_apply();
 }
 
 static void create_tab_audio(lv_obj_t *parent)
@@ -1015,6 +1140,7 @@ static void jog_update_servo_label(void)
 static void jog_motor_on_cb(lv_event_t *e)
 {
     (void)e;
+    if (test_manager_export_mode_active()) return;
     /* Safety lock stays ENGAGED during forward — it is a one-way hold.
      * Only reverse releases it. */
     motor_forward_set(true);
@@ -1035,6 +1161,7 @@ static void jog_motor_off_cb(lv_event_t *e)
 static void jog_motor_rev_cb(lv_event_t *e)
 {
     (void)e;
+    if (test_manager_export_mode_active()) return;
     /* Release safety lock only for reverse (lowering the arm) */
     safety_lock_set(false);
     motor_reverse_set(true);
@@ -1045,6 +1172,7 @@ static void jog_motor_rev_cb(lv_event_t *e)
 static void jog_actuator_on_cb(lv_event_t *e)
 {
     (void)e;
+    if (test_manager_export_mode_active()) return;
     release_set(true);
     jog_update_actuator_label();
 }
@@ -1066,12 +1194,14 @@ static void jog_lock_on_cb(lv_event_t *e)
 static void jog_lock_off_cb(lv_event_t *e)
 {
     (void)e;
+    if (test_manager_export_mode_active()) return;
     safety_lock_set(false);
     jog_update_lock_label();
 }
 
 static void jog_servo_move(float delta)
 {
+    if (test_manager_export_mode_active()) return;
     s_jog_servo_angle += delta;
     if (s_jog_servo_angle < 0.0f)   s_jog_servo_angle = 0.0f;
     if (s_jog_servo_angle > 180.0f) s_jog_servo_angle = 180.0f;
@@ -1086,6 +1216,7 @@ static void jog_servo_p10_cb(lv_event_t *e) { (void)e; jog_servo_move( 10.0f); }
 
 static void jog_servo_goto_cb(lv_event_t *e)
 {
+    if (test_manager_export_mode_active()) return;
     float target = (float)(intptr_t)lv_event_get_user_data(e);
     s_jog_servo_angle = target;
     if (s_jog_servo_angle < 0.0f)   s_jog_servo_angle = 0.0f;
@@ -1413,6 +1544,9 @@ static void show_tab(int tab)
     }
     s_jog_endstop_lbl     = NULL;
     s_jog_endstop_bot_lbl = NULL;
+    s_wifi_status = NULL;
+    s_wifi_btn = NULL;
+    s_wifi_btn_lbl = NULL;
     lv_obj_clean(content_panel);
     lv_obj_set_flex_flow(content_panel, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(content_panel, 16, 0);

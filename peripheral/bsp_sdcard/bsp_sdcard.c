@@ -1,17 +1,43 @@
 #include "bsp_sdcard.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include <string.h>
 #include <sys/stat.h>
 
 static sdmmc_card_t *sd_card = NULL;
 static bool mounted = false;
+static SemaphoreHandle_t s_sd_mutex = NULL;
+
+static void sdcard_ensure_mutex(void)
+{
+    if (s_sd_mutex == NULL) {
+        s_sd_mutex = xSemaphoreCreateMutex();
+    }
+}
+
+void sdcard_lock(void)
+{
+    sdcard_ensure_mutex();
+    if (s_sd_mutex != NULL) {
+        xSemaphoreTake(s_sd_mutex, portMAX_DELAY);
+    }
+}
+
+void sdcard_unlock(void)
+{
+    if (s_sd_mutex != NULL) {
+        xSemaphoreGive(s_sd_mutex);
+    }
+}
 
 esp_err_t sdcard_init(void)
 {
     esp_err_t err = ESP_OK;
+    sdcard_ensure_mutex();
 
     esp_vfs_fat_sdmmc_mount_config_t mount_config = {
         .format_if_mount_failed = false,
-        .max_files = 5,
+        .max_files = 8,
         .allocation_unit_size = 16 * 1024,
     };
 
@@ -56,13 +82,16 @@ esp_err_t sdcard_append_line(const char *filepath, const char *line)
     if (!mounted)
         return ESP_ERR_INVALID_STATE;
 
+    sdcard_lock();
     FILE *f = fopen(filepath, "a");
     if (f == NULL) {
+        sdcard_unlock();
         SD_ERROR("Failed to open %s for appending", filepath);
         return ESP_FAIL;
     }
     fprintf(f, "%s\n", line);
     fclose(f);
+    sdcard_unlock();
     return ESP_OK;
 }
 
@@ -73,20 +102,24 @@ esp_err_t sdcard_ensure_file_with_header(const char *filepath, const char *heade
     if (!mounted)
         return ESP_ERR_INVALID_STATE;
 
+    sdcard_lock();
     struct stat st;
     if (stat(filepath, &st) == 0) {
         /* File already exists */
+        sdcard_unlock();
         return ESP_OK;
     }
 
     /* Create new file with header */
     FILE *f = fopen(filepath, "w");
     if (f == NULL) {
+        sdcard_unlock();
         SD_ERROR("Failed to create %s", filepath);
         return ESP_FAIL;
     }
     fprintf(f, "%s\n", header);
     fclose(f);
+    sdcard_unlock();
     SD_INFO("Created %s with header", filepath);
     return ESP_OK;
 }
@@ -100,8 +133,11 @@ esp_err_t sdcard_read_lines(const char *filepath,
     if (!mounted)
         return ESP_ERR_INVALID_STATE;
 
+    /* Held for the whole read. line_cb must not call sdcard_* functions. */
+    sdcard_lock();
     FILE *f = fopen(filepath, "r");
     if (f == NULL) {
+        sdcard_unlock();
         SD_ERROR("Failed to open %s for reading", filepath);
         return ESP_FAIL;
     }
@@ -117,6 +153,7 @@ esp_err_t sdcard_read_lines(const char *filepath,
     }
 
     fclose(f);
+    sdcard_unlock();
     return ESP_OK;
 }
 
@@ -124,8 +161,11 @@ bool sdcard_file_exists(const char *filepath)
 {
     if (filepath == NULL || !mounted)
         return false;
+    sdcard_lock();
     struct stat st;
-    return (stat(filepath, &st) == 0);
+    bool exists = (stat(filepath, &st) == 0);
+    sdcard_unlock();
+    return exists;
 }
 
 esp_err_t sdcard_get_space(uint64_t *total_bytes, uint64_t *free_bytes)
@@ -133,10 +173,12 @@ esp_err_t sdcard_get_space(uint64_t *total_bytes, uint64_t *free_bytes)
     if (!mounted)
         return ESP_ERR_INVALID_STATE;
 
+    sdcard_lock();
     FATFS *fs;
     DWORD fre_clust;
     FRESULT res = f_getfree("0:", &fre_clust, &fs);
     if (res != FR_OK) {
+        sdcard_unlock();
         SD_ERROR("Failed to get free space (%d)", res);
         return ESP_FAIL;
     }
@@ -149,5 +191,6 @@ esp_err_t sdcard_get_space(uint64_t *total_bytes, uint64_t *free_bytes)
     if (free_bytes != NULL)
         *free_bytes = free_space;
 
+    sdcard_unlock();
     return ESP_OK;
 }

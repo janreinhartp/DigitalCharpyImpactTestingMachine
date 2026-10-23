@@ -76,8 +76,10 @@ esp_err_t dbtt_manager_save_csv(void)
         return ESP_ERR_INVALID_STATE;
     }
 
+    sdcard_lock();
     FILE *f = fopen("/sdcard/DBTT_results.csv", "a");
     if (!f) {
+        sdcard_unlock();
         ESP_LOGE(TAG, "Failed to open /sdcard/DBTT_results.csv");
         return ESP_FAIL;
     }
@@ -98,6 +100,7 @@ esp_err_t dbtt_manager_save_csv(void)
     }
 
     fclose(f);
+    sdcard_unlock();
     ESP_LOGI(TAG, "Saved %d records to /sdcard/DBTT_results.csv", s_session.n_done);
     return ESP_OK;
 }
@@ -123,13 +126,16 @@ esp_err_t dbtt_manager_save_session(void)
         snprintf(filepath, sizeof(filepath), "/sdcard/DBTT_session_%03d.dat", s_seq++);
     }
 
+    sdcard_lock();
     FILE *f = fopen(filepath, "wb");
     if (!f) {
+        sdcard_unlock();
         ESP_LOGE(TAG, "Cannot create %s", filepath);
         return ESP_FAIL;
     }
     size_t written = fwrite(&s_session, sizeof(s_session), 1, f);
     fclose(f);
+    sdcard_unlock();
 
     if (written != 1) {
         ESP_LOGE(TAG, "Partial write to %s", filepath);
@@ -143,8 +149,12 @@ int dbtt_manager_list_sessions(char list[][32], int max)
 {
     if (!sdcard_is_mounted() || max <= 0) return 0;
 
+    sdcard_lock();
     DIR *dir = opendir("/sdcard");
-    if (!dir) return 0;
+    if (!dir) {
+        sdcard_unlock();
+        return 0;
+    }
 
     int count = 0;
     struct dirent *entry;
@@ -159,6 +169,7 @@ int dbtt_manager_list_sessions(char list[][32], int max)
         }
     }
     closedir(dir);
+    sdcard_unlock();
 
     /* Bubble-sort alphabetically (== chronologically with our naming) */
     for (int i = 0; i < count - 1; i++) {
@@ -181,12 +192,15 @@ esp_err_t dbtt_manager_load_session(const char *filename, dbtt_session_t *out)
     char path[64];
     snprintf(path, sizeof(path), "/sdcard/%s", filename);
 
+    sdcard_lock();
     FILE *f = fopen(path, "rb");
     if (!f) {
+        sdcard_unlock();
         ESP_LOGE(TAG, "Cannot open %s", path);
         return ESP_FAIL;
     }
     size_t n = fread(out, sizeof(dbtt_session_t), 1, f);
     fclose(f);
+    sdcard_unlock();
     return (n == 1) ? ESP_OK : ESP_FAIL;
 }

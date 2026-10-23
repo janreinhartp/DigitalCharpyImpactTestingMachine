@@ -25,6 +25,8 @@ main/
   data_logger.c/h     — SD card CSV logging & RAM history cache (50 entries)
   dbtt_manager.c/h    — DBTT (ductile-to-brittle) multi-specimen session manager
   audio_manager.c/h   — Sound effect helpers (wraps bsp_audio)
+  wifi_portal.c/h     — On-demand SoftAP (Charpy-Impact). Started from Settings, not at boot
+  web_export.c/h      — HTTP download of CHARPY_*.csv and DBTT_results.csv
   include/
     charpy_calc.h     — Charpy energy formula & data structs (header-only)
     main.h            — Shared includes & log macros
@@ -63,9 +65,9 @@ peripheral/           — Custom BSP components (each is an IDF component)
 | Endstops | GPIO50 = top, GPIO51 = bottom — **direct ESP32 GPIOs**, active-low, internal pull-up |
 | Servo | GPIO27, MCPWM, 50 Hz, 1000–2000 µs, 14 V power rail (GND shared with ESP32) |
 | I2S audio | IO21 LRCLK, IO22 BCLK, IO23 DOUT; AMP_EN=GPIO30 active-low |
+| ESP32-C6 Wi-Fi | SDMMC slot 1, 1-bit, CrowPanel V1.0: CLK 18, CMD 19, D0 14, D1 15, reset GPIO32 active-high. Streaming, 40 MHz. Slot 0 remains the TF card. Do not power this link from LDO4 |
 | LVGL | v9.2.2 via managed component; display 1024×600 |
-
-> **README vs code discrepancy**: The README shows the old PCF8575 pinout (P0=motor relay, P1=actuator, P2=endstop). The actual pinout in `bsp_extra.h` is P0=motor_fwd, P1=motor_rev, P2=safety_lock, P3=release with direct GPIO endstops. Trust `bsp_extra.h`.
+| CSV hotspot | SSID `Charpy-Impact`, password `charpy-data`, http://192.168.4.1. Off until Settings → SD Card. Export mode blocks new tests and jog, and mutes SD audio |
 
 ## Coding Conventions
 
@@ -79,7 +81,7 @@ Every module defines its own tag and wrapper macros — do not use raw `ESP_LOGI
 
 ### Error Handling
 - Public functions return `esp_err_t`. Check with `ESP_ERROR_CHECK()` for fatal paths, or propagate with early return.
-- LVGL calls are made only while holding the LVGL mutex via `esp_lvgl_port_lock(0)` / `esp_lvgl_port_unlock()`.
+- LVGL calls are made only while holding the LVGL mutex via `lvgl_port_lock()` / `lvgl_port_unlock()`.
 
 ### Active-Low Outputs
 All PCF8575-driven relays are active-low. Use `motor_forward_set(true)` / `motor_forward_set(false)` etc. — never toggle the PCF8575 pin directly from application code.
@@ -108,7 +110,7 @@ See [main/include/test_manager.h](main/include/test_manager.h) for the full enum
 E = m * g * L * (cos(β) − cos(α))
 ```
 
-Implemented as `charpy_calc_energy()` in [main/include/charpy_calc.h](main/include/charpy_calc.h). Default pendulum: 3.95 kg, 0.4 m arm, 150° release.
+Implemented as `charpy_calc_energy()` in [main/include/charpy_calc.h](main/include/charpy_calc.h). Default pendulum: 3.95 kg, 0.4 m arm, 150° release. β is the measured peak angle; nothing is added to it.
 
 ## DBTT Mode
 

@@ -6,5 +6,6 @@ idf_component_register(SRCS ${main}
                         REQUIRES bsp_extra bsp_display bsp_illuminate bsp_i2c
                                  bsp_angle bsp_rtc bsp_sdcard bsp_audio bsp_servo
                                  bsp_pcf8575 esp_timer nvs_flash fatfs sdmmc driver
+                                 esp_wifi esp_netif esp_event esp_http_server
                                  espressif__esp_lvgl_port)
                                  

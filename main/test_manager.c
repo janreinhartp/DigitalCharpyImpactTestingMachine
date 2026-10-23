@@ -30,7 +30,6 @@
 #define RECOVERY_CONFIRM_SAMPLES 3    /* Reject isolated ADC spikes before completing         */
 #define MEASURE_TIMEOUT_MS    30000   /* If no recovery detected within this time the         *
                                        * specimen is considered unbroken — record and stop   */
-#define FINAL_ANGLE_OFFSET_DEG 40.0f  /* Temporary correction pending encoder replacement      */
 
 /* Actuator pulse duration */
 #define ACTUATOR_PULSE_MS      200
@@ -54,6 +53,7 @@
 #define NVS_KEY_LATCH_MS   "latch_ms"
 
 static test_state_t current_state     = TEST_STATE_IDLE;
+static bool s_export_mode             = false;
 static pendulum_config_t pendulum_cfg;
 static float    brake_target_angle    = 90.0f;
 static uint32_t brake_hold_ms         = 10000;
@@ -82,7 +82,7 @@ static void angle_sampling_task(void *arg);
 
 static float corrected_final_angle(float peak_angle)
 {
-    return fminf(fabsf(peak_angle) + FINAL_ANGLE_OFFSET_DEG, 180.0f);
+    return fminf(fabsf(peak_angle), 180.0f);
 }
 
 static void calculate_result_energy(void)
@@ -610,8 +610,24 @@ const char *test_manager_state_name(test_state_t state)
     }
 }
 
+void test_manager_set_export_mode(bool enabled)
+{
+    s_export_mode = enabled;
+    TM_INFO("CSV export mode %s", enabled ? "on" : "off");
+}
+
+bool test_manager_export_mode_active(void)
+{
+    return s_export_mode;
+}
+
 esp_err_t test_manager_start_new(void)
 {
+    if (s_export_mode) {
+        TM_ERROR("Cannot start a test while CSV download is active");
+        return ESP_ERR_INVALID_STATE;
+    }
+
     if (current_state != TEST_STATE_IDLE) {
         TM_ERROR("Cannot start new test from state %s", test_manager_state_name(current_state));
         return ESP_ERR_INVALID_STATE;
@@ -631,6 +647,11 @@ esp_err_t test_manager_start_new(void)
 
 esp_err_t test_manager_arm(const specimen_info_t *specimen)
 {
+    if (s_export_mode) {
+        TM_ERROR("Cannot arm while CSV download is active");
+        return ESP_ERR_INVALID_STATE;
+    }
+
     if (current_state != TEST_STATE_SPECIMEN_ENTRY) {
         TM_ERROR("Cannot arm from state %s", test_manager_state_name(current_state));
         return ESP_ERR_INVALID_STATE;
